@@ -1,0 +1,63 @@
+-- XReserve Phase 12A Correction — Add missing used_at column to user_2fa_verifications
+--
+-- ROOT CAUSE:
+-- Migration 004 created user_2fa_verifications WITHOUT a used_at column:
+--   (id, user_id, verified_at, expires_at, used)
+--
+-- Migration 006 introduced _consume_verification_token() which references used_at:
+--   SELECT user_id, operation_scope, expires_at, used_at FROM user_2fa_verifications
+--   UPDATE user_2fa_verifications SET used = true, used_at = NOW()
+--
+-- The column was never added to the table, causing:
+--   "column used_at does not exist"
+-- when any function calls _consume_verification_token(), which includes:
+--   _require_2fa_verification() → _consume_verification_token()
+--   _require_admin_2fa() → _require_2fa_verification()
+--   admin_upsert_deposit_method() → _require_admin_2fa()
+--   admin_update_exchange_rate() → _require_admin_2fa()
+--   admin_credit_deposit() → _require_2fa_verification()
+--   create_deposit() → _require_2fa_verification()
+--   ... and all other functions using the migration 006 2FA path.
+--
+-- FIX:
+-- Add the missing column. This aligns the production schema with the
+-- function definitions that already exist in migrations 005/006.
+--
+-- SAFETY:
+-- - ADD COLUMN IF NOT EXISTS is idempotent
+-- - Existing rows get NULL for used_at (correct: NULL = not yet consumed)
+-- - No data is modified or deleted
+-- - No functions are changed
+-- - No RLS policies are affected
+-- - No 2FA secrets or user data are touched
+
+-- =============================================================================
+-- 1. ADD MISSING COLUMN
+-- =============================================================================
+
+ALTER TABLE public.user_2fa_verifications
+ADD COLUMN IF NOT EXISTS used_at TIMESTAMPTZ;
+
+-- =============================================================================
+-- 2. VERIFICATION
+-- =============================================================================
+-- After running this migration, verify the column exists:
+--
+--   SELECT column_name, data_type, is_nullable
+--   FROM information_schema.columns
+--   WHERE table_schema = 'public'
+--     AND table_name = 'user_2fa_verifications'
+--   ORDER BY ordinal_position;
+--
+-- Expected columns:
+--   id              | uuid                     | NO
+--   user_id         | uuid                     | NO
+--   verified_at     | timestamp with time zone | NO
+--   expires_at      | timestamp with time zone | NO
+--   used            | boolean                  | NO
+--   operation_scope | text                     | YES
+--   used_at         | timestamp with time zone | YES
+--
+-- =============================================================================
+-- 3. MIGRATION COMPLETE
+-- =============================================================================

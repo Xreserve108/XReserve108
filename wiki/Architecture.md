@@ -1,0 +1,234 @@
+# Architecture
+
+## System Overview
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        Browser (Client)                         │
+│                                                                 │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌───────────────┐  │
+│  │  Pages   │  │Components│  │  Core    │  │  Admin Panel  │  │
+│  │ (home,   │  │(OrderCard│  │ (router, │  │ (dashboard,   │  │
+│  │  wallet, │  │StatusBadg│  │  auth,   │  │  deposits,    │  │
+│  │  sell,   │  │TotpDialog│  │  theme,  │  │  sell-orders, │  │
+│  │  deposit,│  │ConfirmDlg│  │  totp,   │  │  deposit-     │  │
+│  │  orders, │  └──────────┘  │  user-   │  │  methods,     │  │
+│  │  profile,│                │  name)   │  │  security)    │  │
+│  │  signin, │  ┌──────────────────────────────────────────┐  │  │
+│  │  security│  │         Supabase JS Client               │  │  │
+│  └──────────┘  │  (auth, RPC calls, Edge Function calls)  │  │  │
+│                └──────────────────────────────────────────┘  │  │
+└──────────────────────────┬──────────────────────────────────────┘
+                           │ HTTPS
+                           ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                      Supabase Platform                          │
+│                                                                 │
+│  ┌──────────────┐  ┌──────────────────┐  ┌─────────────────┐  │
+│  │  Supabase    │  │  PostgreSQL      │  │  Edge Functions │  │
+│  │  Auth        │  │  (RPC Functions) │  │  (Deno)         │  │
+│  │              │  │                  │  │                 │  │
+│  │  - Google    │  │  - Wallet ops    │  │  - enroll-2fa   │  │
+│  │    OAuth     │  │  - Admin ops     │  │  - verify-2fa   │  │
+│  │  - JWT       │  │  - 2FA status    │  │  - verify-2fa-  │  │
+│  │  - Sessions  │  │  - Deposit mgmt  │  │    setup        │  │
+│  │              │  │  - Sell orders   │  │  - disable-2fa  │  │
+│  │              │  │  - Audit logs    │  │  - verify-trc20-│  │
+│  │              │  │  - Deposit       │  │    deposit      │  │
+│  │              │  │    methods       │  │                 │  │
+│  └──────────────┘  └──────────────────┘  └─────────────────┘  │
+│                                                                 │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │              Database Tables (PostgreSQL)                 │  │
+│  │                                                          │  │
+│  │  profiles · wallets · wallet_balances · ledger_entries   │  │
+│  │  deposits · sell_orders · exchange_settings              │  │
+│  │  deposit_methods · admin_users · audit_logs              │  │
+│  │  user_2fa · recovery_codes · user_2fa_verifications      │  │
+│  │  notifications                                           │  │
+│  └──────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Shared Data Modules** (`src/data/`): Thin wrappers over Supabase RLS-scoped queries. `wallet-data.js` provides `getWalletBalance()` and `getTransactions()` used by wallet page, home page, and navigation header balance display.
+
+## Data Flow
+
+### User Deposit Flow (Phase 12C + Phase 14)
+
+```
+User navigates to Deposit page → 2FA gate checked
+    → Active deposit method loaded (admin-configured TRC20 address)
+    → User sees QR code + deposit address
+    → User sends USDT off-chain to the deposit address
+    → User enters: amount, TXID, optional blockchain URL
+    → User completes 2FA verification (user_transaction scope)
+    → Frontend calls submit_deposit RPC with verification_id
+    → RPC validates: auth, active deposit method, amount, TXID, URL
+    → RPC resolves destination address server-side from deposit_methods
+    → Deposit created (status: PENDING_VERIFICATION) — NO wallet crediting
+    → Frontend attempts to enqueue blockchain verification (non-fatal)
+    → verify-trc20-deposit Edge Function queries TronGrid API
+    → On-chain amount recorded as verified_amount
+    → Admin reviews deposit with full verification details
+    → Admin completes manual verification checklist (8 items)
+    → Admin verifies TOTP → calls admin_manually_verify_deposit RPC
+    → OR: Admin verifies TOTP → calls admin_credit_deposit RPC (legacy path)
+    → Wallet balance credited + ledger entry created
+    → Deposit marked CREDITED
+```
+
+### User Sell Order Flow
+
+```
+User enters USDT amount → Frontend calculates INR payout
+    → User clicks "Sell Now"
+    → TotpDialog opens → User enters TOTP code
+    → Frontend calls verify-2fa Edge Function → gets verification_id
+    → Frontend calls create_sell_order RPC with verification_id
+    → RPC validates token (scope: user_transaction, single-use)
+    → USDT moved: available → reserved
+    → Ledger entry (RESERVE) created
+    → Sell order created (status: PAYMENT_PENDING)
+    → Admin reviews → verifies TOTP → completes or rejects
+    → On complete: reserved USDT consumed, order COMPLETED
+    → On reject/cancel: reserved USDT released back to available
+```
+
+### 2FA Enrollment Flow
+
+```
+User navigates to Security → clicks "Set Up 2FA"
+    → Frontend calls enroll-2fa Edge Function
+    → Edge Function generates secret (otplib), encrypts (AES-256-GCM), upserts to user_2fa
+    → Returns secret + otpauth URI
+    → Frontend renders QR code
+    → User scans QR, enters 6-digit code
+    → Frontend calls verify-2fa-setup Edge Function
+    → Edge Function verifies code, enables 2FA, generates 10 recovery codes
+    → Recovery codes shown to user (one-time display)
+```
+
+### Blockchain Verification Flow (Phase 14)
+
+```
+Deposit created (PENDING_VERIFICATION)
+    → request_blockchain_verification RPC enqueues deposit
+    → verify-trc20-deposit Edge Function called (admin JWT or cron secret)
+    → Queries TronGrid API: GET /v1/accounts/{address}/transactions
+    → Searches for matching TXID in transaction list
+    → Validates: correct token contract, sufficient confirmations, success status
+    → Compares on-chain amount with declared amount
+    → Records verified_amount on deposit row
+    → Admin can view full verification details via get_deposit_verification_details RPC
+    → Admin completes 8-point manual verification checklist
+    → admin_manually_verify_deposit RPC credits wallet atomically
+```
+
+## Application Bootstrap Sequence
+
+```
+main.js
+  ├── initTheme()          — Apply saved/system theme preference
+  ├── initLenis()          — Start smooth scrolling (respects reduced-motion)
+  ├── Show loading spinner
+  ├── initAuth()           — Resolve initial Supabase session
+  ├── Check 2FA status     — If enabled, show TotpDialog at login
+  │   ├── Success → continue
+  │   ── Fail/cancel → signOut(), redirect to signin
+  ├── isAdmin()            — Check admin status, cache result
+  ├── setupAuthListener()  — Subscribe to auth state changes
+  ├── initApp()
+  │   ├── onLayoutChange() — Register layout switch handler
+  │   ├── registerRoutes() — Register all user + admin routes
+  │   ── initRouter()     — Start hash-based routing
+  └── Redirect admin → admin dashboard
+
+Note: Page render functions (home, wallet, orders) are async.
+The router's renderPage() awaits route.render() before appending to DOM.
+```
+
+## Layout System
+
+The app has two distinct layouts that are swapped dynamically by the router:
+
+### User Layout
+```
+┌────────────────────────────────────────────┐
+│ ┌──────────┐ ┌──────────────────────────┐  │
+│ │ Desktop  │ │ TopBar (logo, wallet balance,    │  │
+│ │ Sidebar  │ │  theme toggle, profile icon)     │  │
+│ │ (240px)  │ ├──────────────────────────┤  │
+│ │          │ │                          │  │
+│ │ - Home   │ │   Page Content           │  │
+│ │ - Wallet │ │   (#page-content)        │  │
+│ │ - Sell   │ │                          │  │
+│ │ - Orders │ │                          │  │
+│ │          │ │                          │  │
+│ │ [Theme]  ├──────────────────────────┤  │
+│ └──────────┘ │ BottomNav (mobile)     │  │
+│              └──────────────────────────┘  │
+└────────────────────────────────────────────┘
+```
+
+**TopBar wallet balance control** (authenticated users only):
+- Tether/USDT icon + real available balance + chevron
+- Balance fetched via `getWalletBalance()` from `wallet_balances` table (RLS-scoped)
+- Always visible (including mobile); compact sizing prevents header overflow
+
+### Admin Layout
+```
+┌────────────────────────────────────────────┐
+│ Header: "XReserve Admin"    [Theme Toggle] │
+├────────────────────────────────────────────┤
+│ Nav Tabs: Dashboard | Deposits | Orders    │
+│           | Deposit Methods | Settings     │
+├────────────────────────────────────────────┤
+│                                            │
+│   Page Content (#page-content)             │
+│                                            │
+└────────────────────────────────────────────┘
+```
+
+## Migration Phases
+
+| Migration | Phase | Description |
+|---|---|---|
+| `001_database_foundation.sql` | Phase 3 | Core tables, RLS, auto-provision trigger |
+| `002_wallet_engine.sql` | Phase 4A | Wallet operations (create sell, credit, release, consume) |
+| `003_admin_operations.sql` | Phase 5-7 | Admin users, admin RPC functions, dashboard stats |
+| `004_two_factor_auth.sql` | Phase 9A | TOTP in PL/pgSQL (superseded by 005) |
+| `005_edge_function_2fa.sql` | Phase 9A (prod) | Replaces PL/pgSQL TOTP with Edge Function-based verification |
+| `006_phase_9b_security_hardening.sql` | Phase 9B | Atomic token consumption, strict scope enforcement, deposit verification |
+| `007_phase_10a_username_auth.sql` | Phase 10A | Username-based authentication (case-insensitive login, case-preserving storage) |
+| `008_phase_11_admin_security_hardening.sql` | Phase 11 | Hardened admin_users table (super_admin role, RLS, audit) |
+| `009_phase_12a_active_deposit_methods.sql` | Phase 12A | Admin-configurable deposit method registry (TRC20, BEP20) |
+| `010_phase_12a_verification_used_at_fix.sql` | Phase 12A fix | Adds missing `used_at` column to `user_2fa_verifications` |
+| `011b_phase_12c_user_deposit_submission_safe_parts.sql` | Phase 12C | User deposit submission (submit_deposit, get_user_pending_deposits) |
+| `012_phase_12c_admin_credit_security_fix.sql` | Phase 12C fix | Hardens admin_credit_deposit (drops 2-arg overload, blocks PENDING_VERIFICATION credit) |
+| `013_phase_12c_admin_status_rpc_security_fix.sql` | Phase 12C fix | Hardens admin_update_deposit_status (drops 2-arg overload, removes CREDITED target) |
+| `014_phase_14_trc20_blockchain_verification.sql` | Phase 14 | TRC20 blockchain verification (TronGrid API, manual verification checklist) |
+| `014b_phase_14_trc20_blockchain_verification_corrected.sql` | Phase 14 fix | Corrected blockchain verification wiring |
+| `015_phase_15_user_bank_accounts.sql` | Phase 15 | `bank_accounts` table — user-managed bank accounts for sell payouts |
+| `016_phase_16_sell_usdt_workflow.sql` | Phase 16 | Hardened sell order workflow (server-side rate, bank ownership, idempotency) |
+| `017_drop_legacy_sell_rpcs.sql` | Phase 17 | Drops legacy create_sell_order overloads (security cleanup) |
+| `018_admin_manual_verify_independent_path.sql` | Phase 18 | Independent admin manual verification path |
+| `019_credit_continuation_and_notification_counts.sql` | Phase 19 | Admin credit continuation + notification counts |
+| `020_notifications.sql` | Phase 20 | User & admin notification system with event wiring in financial RPCs |
+
+## Environment Variables
+
+| Variable | Purpose |
+|---|---|
+| `VITE_SUPABASE_URL` | Supabase project URL |
+| `VITE_SUPABASE_ANON_KEY` | Supabase anonymous key (public) |
+
+**Edge Function secrets** (set via Supabase dashboard, never in client code):
+
+| Secret | Purpose |
+|---|---|
+| `SUPABASE_URL` | Supabase project URL (auto-injected) |
+| `SUPABASE_ANON_KEY` | Anon key (auto-injected) |
+| `SUPABASE_SERVICE_ROLE_KEY` | Service role key (auto-injected) |
+| `TOTP_ENCRYPTION_KEY` | AES-256-GCM key for encrypting TOTP secrets at rest |
+| `BLOCKCHAIN_VERIFY_SECRET` | Shared secret for cron/service-role access to verify-trc20-deposit |
