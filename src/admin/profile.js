@@ -130,7 +130,10 @@ async function handleAdminSignOut() {
   }
   try {
     await signOut();
-    navigate('signin');
+    // Clear any authenticated route hash and do a full reload so the app
+    // boots fresh in the unauthenticated state
+    window.history.replaceState(null, '', window.location.pathname);
+    window.location.reload();
   } catch {
     if (btn) {
       btn.disabled = false;

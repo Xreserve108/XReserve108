@@ -130,9 +130,9 @@ export function renderAdminNotifications() {
     }
     pager.innerHTML = `
       <div class="flex items-center justify-between gap-3">
-        <button id="notif-prev" class="rounded-full px-4 py-2 text-[13px] font-medium ${currentPage > 0 ? 'tab-active' : 'cursor-not-allowed opacity-50 bg-black/[0.04] text-text-secondary dark:bg-white/[0.06] dark:text-text-secondary-dark'}" ${currentPage === 0 ? 'disabled' : ''}>Previous</button>
+        <button id="notif-prev" class="rounded-full px-4 py-2 text-[13px] font-medium ${currentPage > 0 ? 'tab-active' : 'tab-inactive cursor-not-allowed opacity-50'}" ${currentPage === 0 ? 'disabled' : ''}>Previous</button>
         <span class="text-[12px] font-medium text-text-secondary dark:text-text-secondary-dark">Page ${currentPage + 1}</span>
-        <button id="notif-next" class="rounded-full px-4 py-2 text-[13px] font-medium ${hasMore ? 'tab-active' : 'cursor-not-allowed opacity-50 bg-black/[0.04] text-text-secondary dark:bg-white/[0.06] dark:text-text-secondary-dark'}" ${!hasMore ? 'disabled' : ''}>Next</button>
+        <button id="notif-next" class="rounded-full px-4 py-2 text-[13px] font-medium ${hasMore ? 'tab-active' : 'tab-inactive cursor-not-allowed opacity-50'}" ${!hasMore ? 'disabled' : ''}>Next</button>
       </div>
     `;
     pager.querySelector('#notif-prev')?.addEventListener('click', () => {

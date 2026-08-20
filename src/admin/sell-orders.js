@@ -27,7 +27,7 @@ export function renderAdminSellOrders() {
   filters.forEach((f) => {
     const btn = document.createElement('button');
     btn.className = `whitespace-nowrap rounded-full px-4 py-2 text-[13px] font-medium transition-colors duration-150 ${
-      f === activeFilter ? 'tab-active' : 'bg-black/[0.04] text-text-secondary dark:bg-white/[0.06] dark:text-text-secondary-dark'
+      f === activeFilter ? 'tab-active' : 'tab-inactive'
     }`;
     btn.textContent = f;
     btn.dataset.filter = f;
@@ -35,7 +35,7 @@ export function renderAdminSellOrders() {
       activeFilter = f;
       filterBar.querySelectorAll('button').forEach((b) => {
         b.className = `whitespace-nowrap rounded-full px-4 py-2 text-[13px] font-medium transition-colors duration-150 ${
-          b.dataset.filter === activeFilter ? 'tab-active' : 'bg-black/[0.04] text-text-secondary dark:bg-white/[0.06] dark:text-text-secondary-dark'
+          b.dataset.filter === activeFilter ? 'tab-active' : 'tab-inactive'
         }`;
       });
       loadOrders();

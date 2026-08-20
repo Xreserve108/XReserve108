@@ -249,6 +249,44 @@ export function renderDeposit() {
     btn.addEventListener('click', () => { screen = 'submit'; render(); });
     content.appendChild(btn);
 
+    // How-to instructions
+    const howTo = document.createElement('div');
+    howTo.className = 'card p-5';
+    howTo.innerHTML = `
+      <h2 class="text-[14px] font-semibold text-text-primary dark:text-text-primary-dark mb-1">How Deposits Work</h2>
+      <p class="text-[12px] text-text-secondary dark:text-text-secondary-dark mb-4">Follow these three steps to complete your deposit.</p>
+      <ol class="space-y-5">
+        <li class="flex gap-3.5">
+          <span class="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-black/[0.05] dark:bg-white/[0.08] text-[12px] font-bold text-text-primary dark:text-text-primary-dark">1</span>
+          <div class="min-w-0">
+            <p class="text-[13px] font-semibold text-text-primary dark:text-text-primary-dark">Send USDT</p>
+            <p class="mt-1 text-[12px] leading-relaxed text-text-secondary dark:text-text-secondary-dark">Scan the QR code or copy the <strong>${escapeHtml(activeMethod.network)}</strong> wallet address shown above, then send your desired USDT amount to <strong>that address only</strong>. Do not send funds to any other address.</p>
+          </div>
+        </li>
+        <li class="flex gap-3.5">
+          <span class="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-black/[0.05] dark:bg-white/[0.08] text-[12px] font-bold text-text-primary dark:text-text-primary-dark">2</span>
+          <div class="min-w-0">
+            <p class="text-[13px] font-semibold text-text-primary dark:text-text-primary-dark">Continue</p>
+            <p class="mt-1 text-[12px] leading-relaxed text-text-secondary dark:text-text-secondary-dark">Once your blockchain transaction has been submitted, tap <strong>Continue</strong> above to proceed.</p>
+          </div>
+        </li>
+        <li class="flex gap-3.5">
+          <span class="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-black/[0.05] dark:bg-white/[0.08] text-[12px] font-bold text-text-primary dark:text-text-primary-dark">3</span>
+          <div class="min-w-0">
+            <p class="text-[13px] font-semibold text-text-primary dark:text-text-primary-dark">Submit Transaction Details</p>
+            <p class="mt-1 text-[12px] leading-relaxed text-text-secondary dark:text-text-secondary-dark">On the next page, enter the details of your transaction:</p>
+            <ul class="mt-2 space-y-1.5 text-[12px] leading-relaxed text-text-secondary dark:text-text-secondary-dark">
+              <li class="flex gap-2"><span class="text-text-primary dark:text-text-primary-dark">•</span><span><strong>Exact USDT amount</strong> you deposited — required</span></li>
+              <li class="flex gap-2"><span class="text-text-primary dark:text-text-primary-dark">•</span><span><strong>Transaction Hash (TX ID)</strong> — required</span></li>
+              <li class="flex gap-2"><span class="text-text-primary dark:text-text-primary-dark">•</span><span>Blockchain URL — <strong class="font-bold text-green-600 dark:text-green-400">OPTIONAL</strong></span></li>
+            </ul>
+            <p class="mt-2.5 rounded-xl bg-black/[0.03] dark:bg-white/[0.04] px-3 py-2.5 text-[12px] leading-relaxed text-text-secondary dark:text-text-secondary-dark">You can find the Transaction Hash (TX ID) in the transaction details of your crypto wallet app, or by searching for your transaction on a blockchain explorer such as Tronscan.</p>
+          </div>
+        </li>
+      </ol>
+    `;
+    content.appendChild(howTo);
+
     // Pending deposits link
     if (pendingDeposits.length > 0) {
       const pendingLink = document.createElement('button');
@@ -290,9 +328,9 @@ export function renderDeposit() {
     // TXID field
     const txidGroup = document.createElement('div');
     txidGroup.innerHTML = `
-      <label class="label" for="dep-txid">Transaction ID (TXID) <span class="text-red-500">*</span></label>
-      <input type="text" class="input-field font-mono text-[13px]" placeholder="Enter transaction ID" id="dep-txid" autocomplete="off" spellcheck="false" value="${escapeHtml(txid)}" />
-      <p class="mt-1.5 text-[11px] text-text-secondary dark:text-text-secondary-dark">Enter the transaction ID of your USDT transfer.</p>
+      <label class="label" for="dep-txid">Transaction Hash (TX ID) <span class="text-red-500">*</span></label>
+      <input type="text" class="input-field font-mono text-[13px]" placeholder="Enter transaction hash" id="dep-txid" autocomplete="off" spellcheck="false" value="${escapeHtml(txid)}" />
+      <p class="mt-1.5 text-[11px] text-text-secondary dark:text-text-secondary-dark">Enter the transaction hash of your USDT transfer.</p>
       <div class="dep-txid-error hidden mt-1 text-[12px] text-red-600 dark:text-red-400"></div>
     `;
     content.appendChild(txidGroup);
@@ -300,7 +338,7 @@ export function renderDeposit() {
     // Blockchain URL field (optional)
     const urlGroup = document.createElement('div');
     urlGroup.innerHTML = `
-      <label class="label" for="dep-url">Blockchain Transaction Link <span class="text-[11px] font-normal text-text-secondary dark:text-text-secondary-dark">(optional)</span></label>
+      <label class="label" for="dep-url">Blockchain Transaction Link <span class="text-[11px] font-bold text-green-600 dark:text-green-400">— OPTIONAL</span></label>
       <input type="url" class="input-field text-[13px]" placeholder="https://tronscan.org/#/transaction/..." id="dep-url" autocomplete="off" value="${escapeHtml(blockchainUrl)}" />
       <p class="mt-1.5 text-[11px] text-text-secondary dark:text-text-secondary-dark">If available, provide a link to the transaction on the blockchain explorer.</p>
       <div class="dep-url-error hidden mt-1 text-[12px] text-red-600 dark:text-red-400"></div>
@@ -321,7 +359,7 @@ export function renderDeposit() {
       </label>
       <label class="flex items-start gap-3 cursor-pointer">
         <input type="checkbox" id="chk-txid" class="mt-0.5 h-4 w-4 rounded border-border-light dark:border-border-dark accent-action dark:accent-action-dark" ${confirmTxid ? 'checked' : ''} />
-        <span class="text-[13px] text-text-primary dark:text-text-primary-dark">The transaction ID is correct.</span>
+        <span class="text-[13px] text-text-primary dark:text-text-primary-dark">The transaction hash is correct.</span>
       </label>
       <label class="flex items-start gap-3 cursor-pointer">
         <input type="checkbox" id="chk-amount" class="mt-0.5 h-4 w-4 rounded border-border-light dark:border-border-dark accent-action dark:accent-action-dark" ${confirmAmount ? 'checked' : ''} />
@@ -606,10 +644,10 @@ export function renderDeposit() {
             <span class="text-[13px] font-medium text-text-primary dark:text-text-primary-dark">${dep.declared_amount ? formatAmount(dep.declared_amount) : '—'} USDT</span>
           </div>
           <div class="flex items-center justify-between">
-            <span class="text-[12px] text-text-secondary dark:text-text-secondary-dark">TXID</span>
+            <span class="text-[12px] text-text-secondary dark:text-text-secondary-dark">Transaction Hash (TX ID)</span>
             <div class="flex items-center gap-1.5">
               <span class="font-mono text-[12px] text-text-primary dark:text-text-primary-dark">${escapeHtml(shortTxid)}</span>
-              ${dep.tx_hash ? `<button class="pending-copy-txid flex h-6 w-6 items-center justify-center rounded-md text-text-secondary hover:bg-black/[0.04] dark:hover:bg-white/[0.06]" data-txid="${escapeHtml(dep.tx_hash)}" aria-label="Copy TXID"><svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-12A1.125 1.125 0 011.5 20.625V7.5a1.125 1.125 0 011.125-1.125H6m11.5-3v10.5a1.125 1.125 0 01-1.125 1.125H5.625m12.75-12.75h.008v.008h-.008V3.75zM19.5 8.25h.008v.008H19.5V8.25zm0 4.5h.008v.008H19.5v-.008zm0 4.5h.008v.008H19.5v-.008zM15 3.75h.008v.008H15V3.75zm4.5 0h.008v.008H19.5V3.75z"/></svg></button>` : ''}
+              ${dep.tx_hash ? `<button class="pending-copy-txid flex h-6 w-6 items-center justify-center rounded-md text-text-secondary hover:bg-black/[0.04] dark:hover:bg-white/[0.06]" data-txid="${escapeHtml(dep.tx_hash)}" aria-label="Copy transaction hash"><svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-12A1.125 1.125 0 011.5 20.625V7.5a1.125 1.125 0 011.125-1.125H6m11.5-3v10.5a1.125 1.125 0 01-1.125 1.125H5.625m12.75-12.75h.008v.008h-.008V3.75zM19.5 8.25h.008v.008H19.5V8.25zm0 4.5h.008v.008H19.5v-.008zm0 4.5h.008v.008H19.5v-.008zM15 3.75h.008v.008H15V3.75zm4.5 0h.008v.008H19.5V3.75z"/></svg></button>` : ''}
             </div>
           </div>
           <div class="flex items-center justify-between">

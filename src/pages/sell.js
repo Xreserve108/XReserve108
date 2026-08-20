@@ -23,7 +23,7 @@ export async function renderSell() {
       <p class="text-muted mt-1 mb-6">Convert USDT to INR at the platform rate</p>
 
       <div class="card flex flex-col items-center p-8 text-center">
-        <div class="flex h-12 w-12 items-center justify-center rounded-full bg-black/[0.04] dark:bg-white/[0.06]">
+        <div class="flex h-12 w-12 items-center justify-center rounded-full bg-[#ECECEF] dark:bg-[#161616]">
           <svg class="h-5 w-5 text-text-secondary dark:text-text-secondary-dark" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M21 12a2.25 2.25 0 00-2.25-2.25H15a3 3 0 11-6 0H5.25A2.25 2.25 0 003 12m18 0v6a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 18v-6m18 0V9M3 12V9m18 0a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 9m18 0V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v3"/></svg>
         </div>
         <p class="mt-4 text-[15px] font-semibold text-text-primary dark:text-text-primary-dark">No USDT available to sell</p>
@@ -45,7 +45,7 @@ export async function renderSell() {
           <p class="text-[11px] font-medium uppercase tracking-wider text-text-secondary dark:text-text-secondary-dark">Available Balance</p>
           <p id="sell-balance" class="mt-1 text-[20px] font-bold tracking-tight text-text-primary dark:text-text-primary-dark">${formatAmount(availableBalance)} <span class="text-[13px] font-medium text-text-secondary dark:text-text-secondary-dark">USDT</span></p>
         </div>
-        <button type="button" id="max-btn" class="rounded-full bg-black/[0.04] px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-text-secondary transition-colors duration-150 hover:bg-black/[0.08] active:bg-black/[0.12] dark:bg-white/[0.06] dark:text-text-secondary-dark dark:hover:bg-white/[0.1]">MAX</button>
+        <button type="button" id="max-btn" class="chip-outline rounded-full bg-[#ECECEF] px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-text-secondary transition-colors duration-150 hover:bg-[#E2E2E7] active:bg-[#D9D9DE] dark:bg-[#161616] dark:text-text-secondary-dark dark:hover:bg-[#1F1F1F]">MAX</button>
       </div>
 
       <label class="label" for="sell-amount">Amount</label>
@@ -64,10 +64,10 @@ export async function renderSell() {
       </div>
 
       <div class="mt-3 flex flex-wrap gap-2" id="quick-amounts">
-        <button type="button" data-amount="10" class="rounded-full bg-black/[0.04] px-3.5 py-1.5 text-[13px] font-medium text-text-primary transition-colors duration-150 hover:bg-black/[0.08] active:bg-black/[0.12] dark:bg-white/[0.06] dark:text-text-primary-dark dark:hover:bg-white/[0.1] dark:active:bg-white/[0.14]">10</button>
-        <button type="button" data-amount="50" class="rounded-full bg-black/[0.04] px-3.5 py-1.5 text-[13px] font-medium text-text-primary transition-colors duration-150 hover:bg-black/[0.08] active:bg-black/[0.12] dark:bg-white/[0.06] dark:text-text-primary-dark dark:hover:bg-white/[0.1] dark:active:bg-white/[0.14]">50</button>
-        <button type="button" data-amount="100" class="rounded-full bg-black/[0.04] px-3.5 py-1.5 text-[13px] font-medium text-text-primary transition-colors duration-150 hover:bg-black/[0.08] active:bg-black/[0.12] dark:bg-white/[0.06] dark:text-text-primary-dark dark:hover:bg-white/[0.1] dark:active:bg-white/[0.14]">100</button>
-        <button type="button" data-amount="500" class="rounded-full bg-black/[0.04] px-3.5 py-1.5 text-[13px] font-medium text-text-primary transition-colors duration-150 hover:bg-black/[0.08] active:bg-black/[0.12] dark:bg-white/[0.06] dark:text-text-primary-dark dark:hover:bg-white/[0.1] dark:active:bg-white/[0.14]">500</button>
+        <button type="button" data-amount="10" class="chip-outline rounded-full bg-[#ECECEF] px-3.5 py-1.5 text-[13px] font-medium text-text-primary transition-colors duration-150 hover:bg-[#E2E2E7] active:bg-[#D9D9DE] dark:bg-[#161616] dark:text-text-primary-dark dark:hover:bg-[#1F1F1F] dark:active:bg-[#262626]">10</button>
+        <button type="button" data-amount="50" class="chip-outline rounded-full bg-[#ECECEF] px-3.5 py-1.5 text-[13px] font-medium text-text-primary transition-colors duration-150 hover:bg-[#E2E2E7] active:bg-[#D9D9DE] dark:bg-[#161616] dark:text-text-primary-dark dark:hover:bg-[#1F1F1F] dark:active:bg-[#262626]">50</button>
+        <button type="button" data-amount="100" class="chip-outline rounded-full bg-[#ECECEF] px-3.5 py-1.5 text-[13px] font-medium text-text-primary transition-colors duration-150 hover:bg-[#E2E2E7] active:bg-[#D9D9DE] dark:bg-[#161616] dark:text-text-primary-dark dark:hover:bg-[#1F1F1F] dark:active:bg-[#262626]">100</button>
+        <button type="button" data-amount="500" class="chip-outline rounded-full bg-[#ECECEF] px-3.5 py-1.5 text-[13px] font-medium text-text-primary transition-colors duration-150 hover:bg-[#E2E2E7] active:bg-[#D9D9DE] dark:bg-[#161616] dark:text-text-primary-dark dark:hover:bg-[#1F1F1F] dark:active:bg-[#262626]">500</button>
       </div>
 
       <div class="divider my-5"></div>
@@ -196,7 +196,7 @@ function openSellWorkflow(page, amount, rate, onSold) {
         <h3 id="wf-title" class="text-[17px] font-semibold text-text-primary dark:text-text-primary-dark"></h3>
         <p id="wf-subtitle" class="mt-0.5 text-[13px] text-text-secondary dark:text-text-secondary-dark"></p>
       </div>
-      <button id="wf-close" class="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl text-text-secondary hover:bg-black/[0.04] dark:hover:bg-white/[0.06]" aria-label="Close">
+      <button id="wf-close" class="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl text-text-secondary hover:bg-[#ECECEF] dark:hover:bg-[#1F1F1F]" aria-label="Close">
         <svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
       </button>
     </div>
@@ -251,7 +251,7 @@ function openSellWorkflow(page, amount, rate, onSold) {
     if (loadedAccounts.length === 0) {
       content.innerHTML = `
         <div class="card flex flex-col items-center p-6 text-center">
-          <div class="flex h-12 w-12 items-center justify-center rounded-full bg-black/[0.04] dark:bg-white/[0.06]">
+          <div class="flex h-12 w-12 items-center justify-center rounded-full bg-[#ECECEF] dark:bg-[#161616]">
             <svg class="h-5 w-5 text-text-secondary dark:text-text-secondary-dark" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 21v-8.25M15.75 21v-8.25M8.25 21v-8.25M3 9l9-6 9 6m-1.5 12V10.332A48.36 48.36 0 0012 9.75c-2.551 0-5.056.2-7.5.582V21M3 5.25l9-6 9 6m-1.5 12V10.332A48.36 48.36 0 0012 9.75c-2.551 0-5.056.2-7.5.582V21"/></svg>
           </div>
           <p class="mt-4 text-[15px] font-semibold text-text-primary dark:text-text-primary-dark">No bank account found</p>

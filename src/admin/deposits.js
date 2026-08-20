@@ -59,7 +59,7 @@ export function renderAdminDeposits() {
   filters.forEach((f) => {
     const btn = document.createElement('button');
     btn.className = `whitespace-nowrap rounded-full px-4 py-2 text-[13px] font-medium transition-colors duration-150 ${
-      f === activeFilter ? 'tab-active' : 'bg-black/[0.04] text-text-secondary dark:bg-white/[0.06] dark:text-text-secondary-dark'
+      f === activeFilter ? 'tab-active' : 'tab-inactive'
     }`;
     btn.textContent = f;
     btn.dataset.filter = f;
@@ -67,7 +67,7 @@ export function renderAdminDeposits() {
       activeFilter = f;
       filterBar.querySelectorAll('button').forEach((b) => {
         b.className = `whitespace-nowrap rounded-full px-4 py-2 text-[13px] font-medium transition-colors duration-150 ${
-          b.dataset.filter === activeFilter ? 'tab-active' : 'bg-black/[0.04] text-text-secondary dark:bg-white/[0.06] dark:text-text-secondary-dark'
+          b.dataset.filter === activeFilter ? 'tab-active' : 'tab-inactive'
         }`;
       });
       loadDeposits();
@@ -296,7 +296,7 @@ export function renderAdminDeposits() {
             <p class="text-[12px] font-semibold text-text-primary dark:text-text-primary-dark mb-2">STAGE 2 — Manual Admin Verification</p>
             <p class="text-[11px] text-text-secondary dark:text-text-secondary-dark mb-3">Independently confirm each of the following before proceeding. The admin who checks these is recorded in the audit log.</p>
             <div class="space-y-2.5" id="manual-checklist">
-              ${checklistItem('txid', 'Transaction ID (TXID) is correct')}
+              ${checklistItem('txid', 'Transaction Hash (TX ID) is correct')}
               ${checklistItem('network', 'TRC20 network confirmed')}
               ${checklistItem('token', 'Token is USDT')}
               ${checklistItem('sender', 'Sender address verified')}
@@ -337,7 +337,7 @@ export function renderAdminDeposits() {
         ${detailRow('Declared', formatAmount(d.declared_amount) + ' USDT')}
         ${detailRow('Verified', d.verified_amount ? formatAmount(d.verified_amount) + ' USDT' : '—')}
         ${detailRow('Credited', d.actual_amount ? formatAmount(d.actual_amount) + ' USDT' : '—')}
-        ${detailRow('TXID', escapeHtml(d.tx_hash) || '—')}
+        ${detailRow('Transaction Hash (TX ID)', escapeHtml(d.tx_hash) || '—')}
         ${d.destination_address ? detailRow('Destination', escapeHtml(d.destination_address)) : ''}
         ${detailRow('Created', new Date(d.created_at).toLocaleString())}
         ${detailRow('Updated', new Date(d.updated_at).toLocaleString())}

@@ -32,7 +32,9 @@ export default {
         },
         border: {
           light: 'rgba(0,0,0,0.06)',
+          'light-strong': 'rgba(0,0,0,0.14)',
           dark: 'rgba(255,255,255,0.08)',
+          'dark-strong': 'rgba(255,255,255,0.22)',
         },
       },
       boxShadow: {

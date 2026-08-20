@@ -7,7 +7,7 @@ export function ConfirmDialog({ title, message, confirmLabel, onConfirm, onCance
       <p class="text-[14px] text-text-secondary dark:text-text-secondary-dark mb-6">${message}</p>
       <div class="flex gap-3">
         <button class="btn-secondary flex-1" id="confirm-cancel">Cancel</button>
-        <button class="${destructive ? 'bg-red-600 hover:bg-red-700' : ''} btn-primary flex-1" id="confirm-ok">${confirmLabel}</button>
+        <button class="${destructive ? 'btn-danger' : ''} btn-primary flex-1" id="confirm-ok">${confirmLabel}</button>
       </div>
     </div>
   `;

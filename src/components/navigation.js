@@ -37,7 +37,7 @@ export function createBottomNav(isAdmin = false) {
   nav.className = 'fixed bottom-0 left-0 right-0 z-50 md:hidden';
   nav.setAttribute('aria-label', isAdmin ? 'Admin navigation' : 'Main navigation');
   nav.innerHTML = `
-    <div class="mx-4 mb-4 rounded-2xl border border-border-light bg-surface-light/80 px-2 py-2 shadow-elevated backdrop-blur-xl dark:border-border-dark dark:bg-surface-dark/80 dark:shadow-elevated-dark">
+    <div class="mx-4 mb-4 rounded-2xl border border-border-light bg-surface-light/90 px-2 py-2 shadow-elevated backdrop-blur-xl dark:border-border-dark dark:bg-surface-dark/90 dark:shadow-elevated-dark">
       <ul class="flex items-center justify-around" id="bottom-nav-list"></ul>
     </div>
   `;
@@ -107,7 +107,7 @@ export function createTopBar() {
   if (signedIn) {
     rightControlsHTML = `
       <div id="wallet-control" class="flex items-center gap-1">
-        <div class="flex items-center gap-1.5 rounded-xl border border-border-light bg-surface-light/80 px-2 py-1.5 backdrop-blur-xl dark:border-border-dark dark:bg-surface-dark/80 overflow-hidden">
+        <div class="flex items-center gap-1.5 rounded-xl border border-border-light bg-surface-light/90 px-2 py-1.5 backdrop-blur-xl dark:border-border-dark dark:bg-surface-dark/90 overflow-hidden">
           ${TetherIcon({ className: 'h-[18px] w-[18px]' })}
           <span id="wallet-balance-text" class="text-[12px] font-semibold tabular-nums text-text-primary dark:text-text-primary-dark">--</span>
           <span class="text-[12px] font-medium text-text-secondary dark:text-text-secondary-dark">USDT</span>

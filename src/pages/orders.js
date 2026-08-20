@@ -103,7 +103,7 @@ export async function renderOrders() {
   const pillClass = (isActive) => `rounded-full px-4 py-2 text-[13px] font-medium transition-colors duration-150 ${
     isActive
       ? 'tab-active'
-      : 'bg-black/[0.04] text-text-secondary dark:bg-white/[0.06] dark:text-text-secondary-dark'
+      : 'tab-inactive'
   }`;
 
   page.innerHTML = `
@@ -248,7 +248,7 @@ function pagerBtnClass(enabled) {
   return `rounded-full px-4 py-2 text-[13px] font-medium transition-colors duration-150 ${
     enabled
       ? 'tab-active'
-      : 'cursor-not-allowed bg-black/[0.04] text-text-secondary opacity-50 dark:bg-white/[0.06] dark:text-text-secondary-dark'
+      : 'tab-inactive cursor-not-allowed opacity-50'
   }`;
 }
 

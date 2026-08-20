@@ -32,7 +32,7 @@ export async function renderHome() {
 
       <div class="mt-6 flex w-full gap-3">
         <a href="#sell" class="btn-primary flex-1 text-center">Sell USDT</a>
-        <a href="#wallet" class="btn-secondary flex-1 text-center">Deposit</a>
+        <a href="#deposit" class="btn-secondary flex-1 text-center">Deposit</a>
       </div>
     </section>
 
