@@ -5,8 +5,8 @@ import { requireVerification } from '@/components/TotpDialog';
 import { TetherIcon } from '@/components/icons/TetherIcon';
 import QRCode from 'qrcode';
 
-const copyIcon = `<svg class="h-[18px] w-[18px]" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-12A1.125 1.125 0 011.5 20.625V7.5a1.125 1.125 0 011.125-1.125H6m11.5-3v10.5a1.125 1.125 0 01-1.125 1.125H5.625m12.75-12.75h.008v.008h-.008V3.75zM19.5 8.25h.008v.008H19.5V8.25zm0 4.5h.008v.008H19.5v-.008zm0 4.5h.008v.008H19.5v-.008zM15 3.75h.008v.008H15V3.75zm4.5 0h.008v.008H19.5V3.75z"/></svg>`;
-const checkIcon = `<svg class="h-[18px] w-[18px]" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>`;
+const copyIcon = `<svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" ry="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const checkIcon = `<svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>`;
 const checkCircleIcon = `<svg class="h-12 w-12" fill="none" stroke="currentColor" stroke-width="1" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>`;
 const warningIcon = `<svg class="h-5 w-5 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>`;
 
@@ -204,13 +204,15 @@ export function renderDeposit() {
     const addrCard = document.createElement('div');
     addrCard.className = 'card p-5';
     addrCard.innerHTML = `
-      <p class="text-[11px] font-medium uppercase tracking-wider text-text-secondary dark:text-text-secondary-dark mb-3">Scan the QR code or copy the address below to send USDT</p>
+      <p class="text-[11px] font-medium uppercase tracking-wider text-text-secondary dark:text-text-secondary-dark mb-3">TRC20 Address</p>
       <div class="dm-qr-gen flex items-center justify-center rounded-xl bg-black/[0.03] dark:bg-white/[0.04] p-4 mb-4 min-h-[160px]">
         <div class="auth-spinner"></div>
       </div>
-      <div class="flex items-center gap-2 rounded-2xl bg-black/[0.03] dark:bg-white/[0.04] px-4 py-3.5">
-        <p class="flex-1 truncate font-mono text-[14px] text-text-primary dark:text-text-primary-dark select-all" title="${escapeHtml(activeMethod.deposit_address)}">${escapeHtml(activeMethod.deposit_address)}</p>
-        <button id="copy-address" class="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl text-text-secondary transition-colors duration-150 hover:bg-black/[0.06] dark:hover:bg-white/[0.08]" aria-label="Copy address">${copyIcon}</button>
+      <div class="rounded-2xl bg-black/[0.03] dark:bg-white/[0.04] px-4 py-3.5">
+        <p class="break-all font-mono text-[14px] leading-relaxed text-text-primary dark:text-text-primary-dark select-all">${escapeHtml(activeMethod.deposit_address)}</p>
+        <div class="mt-3 flex justify-center">
+          <button id="copy-address" class="inline-flex items-center gap-1.5 rounded-lg px-4 py-1.5 text-[13px] font-medium text-text-secondary transition-colors duration-150 hover:bg-black/[0.06] hover:text-text-primary dark:text-text-secondary-dark dark:hover:bg-white/[0.08] dark:hover:text-text-primary-dark" aria-label="Copy TRC20 deposit address">${copyIcon}<span>Copy</span></button>
+        </div>
       </div>
     `;
     content.appendChild(addrCard);
@@ -222,8 +224,12 @@ export function renderDeposit() {
     addrCard.querySelector('#copy-address').addEventListener('click', () => {
       const btn = addrCard.querySelector('#copy-address');
       navigator.clipboard?.writeText(activeMethod.deposit_address);
-      btn.innerHTML = checkIcon;
-      setTimeout(() => { btn.innerHTML = copyIcon; }, 2000);
+      btn.innerHTML = checkIcon + '<span>Copied</span>';
+      btn.classList.add('text-green-600', 'dark:text-green-400');
+      setTimeout(() => {
+        btn.innerHTML = copyIcon + '<span>Copy</span>';
+        btn.classList.remove('text-green-600', 'dark:text-green-400');
+      }, 2000);
     });
 
     // Warning card

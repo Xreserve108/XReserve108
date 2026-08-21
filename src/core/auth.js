@@ -6,6 +6,7 @@ let authLoaded = false;
 let adminStatus = null; // null = unknown, true/false = cached
 let twoFAVerified = false;
 let authGateOpen = false;
+let login2faPending = false; // true during LOGIN 2FA challenge
 let previousUserId = null; // Track user ID to detect actual user changes
 const authCallbacks = [];
 
@@ -99,7 +100,7 @@ function notifyCallbacks(event) {
 
 supabase.auth.onAuthStateChange((event, session) => {
   if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
-    if (authGateOpen) {
+    if (authGateOpen && !login2faPending) {
       const newUser = session?.user || null;
       const newUserId = newUser?.id || null;
       
@@ -121,12 +122,13 @@ supabase.auth.onAuthStateChange((event, session) => {
         // to avoid unnecessary rebuilds
       }
     }
-    // If gate closed, hold currentUser as null until 2FA verified
+    // If gate closed or login 2FA pending, hold currentUser as null until ready
   } else if (event === 'SIGNED_OUT') {
     currentUser = null;
     previousUserId = null;
     twoFAVerified = false;
     authGateOpen = false;
+    login2faPending = false;
   }
   adminStatus = null; // reset admin cache on auth change
   if (authGateOpen || event === 'SIGNED_OUT') {
@@ -176,4 +178,23 @@ export function is2FAVerified() {
 
 export function isAuthGateOpen() {
   return authGateOpen;
+}
+
+export function isLogin2faPending() {
+  return login2faPending;
+}
+
+export function setLogin2faPending(pending) {
+  login2faPending = pending;
+}
+
+export async function completeLogin2FA() {
+  login2faPending = false;
+  twoFAVerified = true;
+  const { data: { session } } = await supabase.auth.getSession();
+  currentUser = session?.user || null;
+  previousUserId = currentUser?.id || null;
+  if (currentUser) {
+    notifyCallbacks('SIGNED_IN');
+  }
 }

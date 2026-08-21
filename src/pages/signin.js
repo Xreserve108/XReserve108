@@ -1,4 +1,4 @@
-import { signInWithUsername, isAuthenticated, signOut } from '@/core/auth';
+import { signInWithUsername, isAuthenticated, signOut, setLogin2faPending, completeLogin2FA } from '@/core/auth';
 import { navigate } from '@/core/router';
 import { normalizeUsername } from '@/core/username';
 import { get2FAStatus } from '@/core/totp';
@@ -99,6 +99,9 @@ async function handleUsernameSignIn(e) {
   hideError();
   
   try {
+    // Block currentUser from being set until 2FA is resolved
+    setLogin2faPending(true);
+
     await signInWithUsername(username, password);
     
     // Check 2FA status and enforce verification
@@ -112,18 +115,19 @@ async function handleUsernameSignIn(e) {
             title: 'Two-Factor Authentication',
             message: 'Verify your identity to continue.',
             allowRecovery: true,
+            mode: 'login',
           });
         } catch {
-          // User cancelled or failed 2FA — sign out
-          await signOut();
+          // User cancelled LOGIN 2FA — TotpDialog already called signOut()
           btn.disabled = false;
           btn.innerHTML = '<span>Sign In</span>';
-          showError('Two-factor authentication failed. Please try again.');
+          showError('2FA authentication is required. Login failed. Please login again.');
           return;
         }
       }
     } catch {
       // 2FA status check failed — sign out for security
+      setLogin2faPending(false);
       await signOut();
       btn.disabled = false;
       btn.innerHTML = '<span>Sign In</span>';
@@ -131,7 +135,10 @@ async function handleUsernameSignIn(e) {
       return;
     }
     
-    // All verification complete — show success state
+    // All verification complete — populate currentUser and rebuild authenticated shell
+    await completeLogin2FA();
+    
+    // Show success state
     btn.innerHTML = `
       <svg class="h-5 w-5 animate-success-check" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
@@ -145,6 +152,7 @@ async function handleUsernameSignIn(e) {
     await new Promise(resolve => setTimeout(resolve, 800));
     navigate('home');
   } catch (err) {
+    setLogin2faPending(false);
     btn.disabled = false;
     btn.classList.remove('btn-success');
     btn.classList.add('btn-primary');

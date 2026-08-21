@@ -29,6 +29,7 @@ import { renderLiveChat } from '@/pages/live-chat';
 import { renderChatHistory } from '@/pages/chat-history';
 import { renderAdminLiveChat, renderAdminHelpSupport } from '@/admin/live-chat';
 import { renderAdminTickets } from '@/admin/tickets';
+import { renderAdminUsers } from '@/admin/users';
 import { renderMyTickets } from '@/pages/my-tickets';
 import { renderCreateTicket } from '@/pages/create-ticket';
 import { renderTicketDetail } from '@/pages/ticket-detail';
@@ -126,7 +127,7 @@ function registerRoutes() {
     onMount: () => updateAdminNav(),
   });
   registerRoute('admin/users', {
-    render: renderAdminPlaceholder.bind(null, 'Users', 'User management coming soon'),
+    render: renderAdminUsers,
     admin: true,
     layout: 'admin',
     onMount: () => updateAdminNav(),

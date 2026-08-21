@@ -69,8 +69,7 @@ export async function renderHome() {
   // ---- CTA buttons (always visible) ----
   const ctaHtml = `
     <div class="mt-6 flex w-full gap-3">
-      <a href="#sell" class="btn-primary flex-1 text-center">Sell USDT</a>
-      <a href="#deposit" class="btn-secondary flex-1 text-center">Deposit</a>
+      <a href="#deposit" class="btn-primary flex-1 text-center">Deposit</a>
     </div>
   `;
 

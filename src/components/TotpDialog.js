@@ -1,4 +1,5 @@
 import { verify2FACode } from '@/core/totp';
+import { signOut } from '@/core/auth';
 
 /**
  * TOTP verification dialog.
@@ -10,9 +11,11 @@ import { verify2FACode } from '@/core/totp';
  * @param {string} options.message - Description text
  * @param {boolean} options.allowRecovery - Allow recovery code input
  * @param {string} options.scope - Operation scope for the verification token
+ * @param {'login'|'action'} options.mode - 'login' for login 2FA (no backdrop/Escape dismiss, Cancel signs out), 'action' for transaction 2FA (default)
  * @returns {Promise<string>} verification_id
  */
-export function TotpDialog({ title = 'Verify Identity', message = 'Enter the 6-digit code from your authenticator app.', allowRecovery = true, scope } = {}) {
+export function TotpDialog({ title = 'Verify Identity', message = 'Enter the 6-digit code from your authenticator app.', allowRecovery = true, scope, mode = 'action' } = {}) {
+  const isLoginMode = mode === 'login';
   return new Promise((resolve, reject) => {
     const overlay = document.createElement('div');
     overlay.className = 'fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4';
@@ -126,17 +129,41 @@ export function TotpDialog({ title = 'Verify Identity', message = 'Enter the 6-d
       }
     });
 
-    cancelBtn.addEventListener('click', () => {
+    cancelBtn.addEventListener('click', async () => {
+      if (isLoginMode) {
+        // LOGIN 2FA: Cancel abandons the login attempt entirely
+        try { await signOut(); } catch { /* session may already be cleared */ }
+      }
       cleanup();
       reject(new Error('cancelled'));
     });
 
-    overlay.addEventListener('click', (e) => {
-      if (e.target === overlay) {
-        cleanup();
-        reject(new Error('cancelled'));
-      }
-    });
+    // LOGIN 2FA: backdrop click is a true modal barrier — do nothing
+    if (!isLoginMode) {
+      overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) {
+          cleanup();
+          reject(new Error('cancelled'));
+        }
+      });
+    }
+
+    // LOGIN 2FA: Escape key must not dismiss the dialog
+    if (!isLoginMode) {
+      const escHandler = (e) => {
+        if (e.key === 'Escape') {
+          cleanup();
+          reject(new Error('cancelled'));
+        }
+      };
+      document.addEventListener('keydown', escHandler);
+      // Store reference for cleanup
+      const origCleanup = cleanup;
+      cleanup = () => {
+        document.removeEventListener('keydown', escHandler);
+        origCleanup();
+      };
+    }
 
     if (recoveryToggle) {
       recoveryToggle.addEventListener('click', () => {
