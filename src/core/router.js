@@ -145,9 +145,12 @@ const adminRouteMap = {
   'admin/users': 'admin/users',
   'admin/settings': 'admin/settings',
   'admin/profile': 'admin/profile',
+  'admin/personal-details': 'admin/personal-details',
   'admin/security': 'admin/security',
   'admin/deposit-methods': 'admin/deposit-methods',
   'admin/notifications': 'admin/notifications',
+  'admin/live-chat': 'admin/live-chat',
+  'admin/help-support': 'admin/help-support',
 };
 
 function resolveHash(hash) {

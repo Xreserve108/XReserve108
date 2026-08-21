@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabase';
 import { get2FAStatus, begin2FAEnrollment, confirm2FAEnrollment, disable2FA, renderQRCode } from '@/core/totp';
+import { requireVerification } from '@/components/TotpDialog';
 
 export function renderAdminSecurity() {
   const page = document.createElement('main');
@@ -64,9 +65,11 @@ function renderAdminEnabled(container, status) {
       <button id="admin-disable-2fa" class="btn-secondary w-full text-red-600 dark:text-red-400">Disable 2FA</button>
     </div>
     <div id="admin-security-feedback" class="hidden mt-4 max-w-lg"></div>
+    ${changePasswordCard()}
   `;
 
   container.querySelector('#admin-disable-2fa').addEventListener('click', () => handleAdminDisable(container));
+  attachChangePasswordHandlers(container);
 }
 
 function renderAdminDisabled(container) {
@@ -85,9 +88,11 @@ function renderAdminDisabled(container) {
       <button id="admin-enable-2fa" class="btn-primary w-full">Set Up 2FA</button>
     </div>
     <div id="admin-security-feedback" class="hidden mt-4 max-w-lg"></div>
+    ${changePasswordCard()}
   `;
 
   container.querySelector('#admin-enable-2fa').addEventListener('click', () => handleAdminEnroll(container));
+  attachChangePasswordHandlers(container);
 }
 
 async function handleAdminEnroll(container) {
@@ -225,6 +230,168 @@ async function handleAdminDisable(container) {
   });
 
   setTimeout(() => input.focus(), 100);
+}
+
+function changePasswordCard() {
+  return `
+    <div class="divider my-6"></div>
+    <div id="cp-section">
+      <div id="cp-trigger" class="card p-5 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <div class="flex h-9 w-9 items-center justify-center rounded-full bg-black/[0.04] dark:bg-white/[0.06]">
+            <svg class="h-[18px] w-[18px] text-text-secondary dark:text-text-secondary-dark" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"/></svg>
+          </div>
+          <div>
+            <p class="text-[14px] font-semibold text-text-primary dark:text-text-primary-dark">Change Password</p>
+            <p class="text-[12px] text-text-secondary dark:text-text-secondary-dark">Update your admin account password</p>
+          </div>
+        </div>
+        <svg class="h-4 w-4 text-text-secondary dark:text-text-secondary-dark" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5"/></svg>
+      </div>
+      <div id="cp-form" class="hidden card p-6 mt-3">
+        <div class="space-y-4">
+          <div>
+            <label class="label" for="cp-current">Current Password</label>
+            <input type="password" id="cp-current" class="input-field" placeholder="Enter current password" autocomplete="current-password" />
+          </div>
+          <div>
+            <label class="label" for="cp-new">New Password</label>
+            <input type="password" id="cp-new" class="input-field" placeholder="Minimum 6 characters" autocomplete="new-password" />
+          </div>
+          <div>
+            <label class="label" for="cp-confirm">Confirm New Password</label>
+            <input type="password" id="cp-confirm" class="input-field" placeholder="Re-enter new password" autocomplete="new-password" />
+          </div>
+        </div>
+        <div id="cp-error" class="hidden mt-3 text-[13px] text-red-600 dark:text-red-400"></div>
+        <div class="flex gap-3 mt-5">
+          <button id="cp-cancel" class="btn-secondary flex-1">Cancel</button>
+          <button id="cp-submit" class="btn-primary flex-1" disabled>Change Password</button>
+        </div>
+        <div id="cp-feedback" class="hidden mt-4"></div>
+      </div>
+    </div>
+  `;
+}
+
+function attachChangePasswordHandlers(container) {
+  const trigger = container.querySelector('#cp-trigger');
+  const form = container.querySelector('#cp-form');
+  if (!trigger || !form) return;
+
+  const currentInput = form.querySelector('#cp-current');
+  const newInput = form.querySelector('#cp-new');
+  const confirmInput = form.querySelector('#cp-confirm');
+  const submitBtn = form.querySelector('#cp-submit');
+  const cancelBtn = form.querySelector('#cp-cancel');
+  const errorEl = form.querySelector('#cp-error');
+  const feedback = form.querySelector('#cp-feedback');
+
+  trigger.addEventListener('click', () => {
+    const isHidden = form.classList.contains('hidden');
+    if (isHidden) {
+      form.classList.remove('hidden');
+      trigger.classList.add('hidden');
+      currentInput.focus();
+    }
+  });
+
+  cancelBtn.addEventListener('click', () => {
+    form.classList.add('hidden');
+    trigger.classList.remove('hidden');
+    currentInput.value = '';
+    newInput.value = '';
+    confirmInput.value = '';
+    errorEl.classList.add('hidden');
+    submitBtn.disabled = true;
+  });
+
+  const validate = () => {
+    errorEl.classList.add('hidden');
+    submitBtn.disabled = !(
+      currentInput.value.length > 0 &&
+      newInput.value.length >= 6 &&
+      confirmInput.value.length >= 6
+    );
+  };
+
+  currentInput.addEventListener('input', validate);
+  newInput.addEventListener('input', validate);
+  confirmInput.addEventListener('input', validate);
+
+  submitBtn.addEventListener('click', async () => {
+    errorEl.classList.add('hidden');
+
+    // Validate passwords
+    if (newInput.value.length < 6) {
+      errorEl.textContent = 'Password must be at least 6 characters';
+      errorEl.classList.remove('hidden');
+      return;
+    }
+    if (newInput.value !== confirmInput.value) {
+      errorEl.textContent = 'New passwords do not match';
+      errorEl.classList.remove('hidden');
+      return;
+    }
+
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Verifying...';
+
+    try {
+      // Step 1: Verify current password
+      const { data: { user } } = await supabase.auth.getUser();
+      const email = user?.email;
+      if (!email) throw new Error('Session expired');
+
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email,
+        password: currentInput.value,
+      });
+      if (signInError) {
+        errorEl.textContent = 'Current password is incorrect';
+        errorEl.classList.remove('hidden');
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Change Password';
+        return;
+      }
+
+      // Step 2: 2FA verification (admin_financial scope for admin operations)
+      submitBtn.textContent = '2FA Required...';
+      try {
+        await requireVerification('Change Password', 'admin_financial');
+      } catch {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Change Password';
+        return;
+      }
+
+      // Step 3: Update password
+      submitBtn.textContent = 'Updating...';
+      const { error: updateError } = await supabase.auth.updateUser({
+        password: newInput.value,
+      });
+      if (updateError) throw updateError;
+
+      // Success
+      showFeedback(feedback, 'Password successfully changed', 'green');
+      currentInput.value = '';
+      newInput.value = '';
+      confirmInput.value = '';
+      submitBtn.textContent = 'Change Password';
+      submitBtn.disabled = true;
+
+      setTimeout(() => {
+        form.classList.add('hidden');
+        trigger.classList.remove('hidden');
+        feedback.classList.add('hidden');
+      }, 2500);
+    } catch (err) {
+      errorEl.textContent = err.message || 'Failed to change password';
+      errorEl.classList.remove('hidden');
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Change Password';
+    }
+  });
 }
 
 function showFeedback(el, message, color) {

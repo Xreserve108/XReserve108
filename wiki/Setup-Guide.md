@@ -68,7 +68,7 @@ VITE_SUPABASE_ANON_KEY=your-anon-key
 
 ### 4.1 Run Database Migrations
 
-Apply the 20 migration files in order to create all tables, RLS policies, RPC functions, and triggers:
+Apply the 23 migration files in order to create all tables, RLS policies, RPC functions, and triggers:
 
 ```bash
 supabase migration up --linked --include-all --yes
@@ -100,6 +100,9 @@ Or apply them individually via the Supabase SQL Editor in the dashboard:
 | 18 | `018_admin_manual_verify_independent_path.sql` | Independent admin manual verification path |
 | 19 | `019_credit_continuation_and_notification_counts.sql` | `admin_credit_verified_deposit` + `admin_notification_counts` |
 | 20 | `020_notifications.sql` | `notifications` table + notification event wiring inside financial RPCs |
+| 21 | `021_pre_reconstruction_cleanup.sql` | Pre-reconstruction cleanup |
+| 22 | `022_live_support_chat.sql` | Live support chat: `support_agent_status`, `support_chat_sessions`, `support_chat_messages` tables, RLS, Realtime publication, 16 RPC functions |
+| 23 | `023_agent_heartbeat_race_hardening.sql` | Agent heartbeat (`last_heartbeat_at`), stale-agent filtering (>3 min), duplicate active-chat unique index |
 
 > **Note on Migration 011b**: If migrations 012+ are already applied but 011 is missing, use `011b` instead of `011`. Migration 011b excludes Section 9 (the `admin_credit_deposit` redefinition) which would revert 012's security fix.
 
@@ -125,6 +128,10 @@ supabase functions deploy market-rates --no-verify-jwt
 ```
 
 > **Note**: Migration 006 is self-contained and can be run directly in Supabase SQL Editor without CLI migrations. It creates all 2FA tables, functions, and security rules if missing, and safely updates existing ones.
+
+### 4.2.1 Configure Realtime for Live Chat
+
+After applying migrations, ensure Realtime is enabled for the live chat tables. Migration 022 automatically adds `support_chat_messages` and `support_chat_sessions` to the `supabase_realtime` publication. Verify in Supabase Dashboard → **Database** → **Replication** that both tables are enabled for Realtime.
 ```
 
 ### 4.4 Set Edge Function Secrets
@@ -261,7 +268,7 @@ src/
 
 supabase/
 ├── functions/       # 6 Deno Edge Functions (enroll-2fa, verify-2fa, verify-2fa-setup, disable-2fa, verify-trc20-deposit, market-rates)
-└── migrations/      # 20 SQL migration files + corrective migrations (011b, 014b)
+└── migrations/      # 23 SQL migration files + corrective migrations (011b, 014b)
 ```
 
 See the other wiki pages for detailed documentation on each module.

@@ -19,7 +19,7 @@
 
 ## Project Name
 
-**xreserve** — v0.1.0
+**xreserve** — v1.3.0
 
 ## Tagline
 
@@ -34,7 +34,9 @@ XReserve is an offline-operated USDT-to-INR exchange. Administrators manually re
 - **Sell orders** — convert USDT to INR at a platform-set exchange rate
 - **Admin operations** — review deposits, credit wallets, complete/reject sell orders, manage deposit methods
 - **Two-factor authentication** — mandatory TOTP (authenticator app) for all sensitive operations
-- **Notifications** — real-time user and admin notifications wired into financial events (deposits, sell orders, signups), created atomically in the same transaction as the financial operation
+- **Live support chat** — real-time in-app chat between users and admin agents (Supabase Realtime, heartbeat-based availability, FIFO queue)
+- **Support tickets** — asynchronous ticket-based support with categories, priorities, internal notes, and assignment tracking (separate from live chat)
+- **Notifications** — real-time user and admin notifications wired into financial events (deposits, sell orders, signups), chat events (assigned, message, ended), and ticket events (created, replied, status changed, resolved, closed)
 - **Audit logging** — every financial action is recorded
 
 ## Tech Stack
@@ -60,6 +62,9 @@ XReserve is an offline-operated USDT-to-INR exchange. Administrators manually re
 6. **Operation-scoped 2FA tokens** — Each TOTP verification produces a single-use token with an operation scope (e.g., `user_transaction`, `admin_financial`).
 7. **Blockchain-verified deposits** — User-declared amounts are declarative only. The actual credited amount is determined by on-chain verification via TronGrid API. Admins perform a manual verification checklist before crediting.
 8. **Admin-configurable deposit methods** — Deposit addresses are managed via the `deposit_methods` table, not hardcoded. Admins can activate/deactivate networks (TRC20, BEP20) dynamically.
+9. **Realtime live chat** — Users and admin agents communicate via Supabase Realtime channels. Agent availability is managed with heartbeat-based presence detection (3-minute stale threshold). FIFO queue ensures fair ordering.
+10. **Heartbeat-based agent presence** — Admin agents must maintain a 60-second heartbeat. Agents with no heartbeat for >3 minutes are excluded from availability calculations and cannot receive new chat assignments.
+11. **Separate live chat and support tickets** — Live chat and support tickets are two independent systems. The floating chat icon is tied exclusively to active live-chat sessions. Tickets use an asynchronous conversation model with status tracking.
 
 ## Repository Structure
 
@@ -86,7 +91,7 @@ XReserve is an offline-operated USDT-to-INR exchange. Administrators manually re
 │   │   ├── disable-2fa/
 │   │   ├── verify-trc20-deposit/  # Blockchain verification via TronGrid
 │   │   └── market-rates/      # Aggregates Binance/OKX/Bybit + CoinGecko rates
-│   └── migrations/            # SQL migrations (20 files, Phases 3–20)
+│   └── migrations/            # SQL migrations (24 files, Phases 3–24)
 ├── wiki/                      # Project documentation
 ├── template/                  # UI template/reference (not used at runtime)
 ├── package.json

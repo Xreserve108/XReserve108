@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { navigate } from '@/core/router';
 import { OrderCard } from '@/components/OrderCard';
 import { StatusBadge } from '@/components/StatusBadge';
 
@@ -62,8 +63,12 @@ export async function renderOrders() {
           </div>
           <p class="mt-4 text-[14px] font-medium text-text-primary dark:text-text-primary-dark">No orders found</p>
           <p class="mt-1 text-[13px] text-text-secondary dark:text-text-secondary-dark">Try a different filter or create a new order</p>
+          <button class="mt-4 text-[13px] font-medium text-action dark:text-action-dark hover:underline" id="empty-support-btn">Need help? Create a support ticket</button>
         </div>
       `;
+      list.querySelector('#empty-support-btn')?.addEventListener('click', () => {
+        navigate('create-ticket');
+      });
       return;
     }
 
@@ -107,8 +112,16 @@ export async function renderOrders() {
   }`;
 
   page.innerHTML = `
-    <h1 class="page-title">Orders</h1>
-    <p class="text-muted mt-1 mb-6">Track your sell orders and deposits</p>
+    <div class="flex items-start justify-between mb-6">
+      <div>
+        <h1 class="page-title">Orders</h1>
+        <p class="text-muted mt-1">Track your sell orders and deposits</p>
+      </div>
+      <button id="orders-support-btn" class="flex-shrink-0 mt-1 flex items-center gap-1.5 rounded-xl px-3 py-2 text-[12px] font-medium text-text-secondary transition-colors duration-150 hover:bg-black/[0.04] dark:hover:bg-white/[0.06] dark:text-text-secondary-dark">
+        <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z"/></svg>
+        Need Help?
+      </button>
+    </div>
 
     <div class="mb-5 flex flex-wrap gap-2" id="type-filters">
       ${typeFilters.map((f) => `
@@ -119,6 +132,10 @@ export async function renderOrders() {
     <div class="stagger flex flex-col gap-3" id="order-list"></div>
     <div id="order-pagination"></div>
   `;
+
+  page.querySelector('#orders-support-btn').addEventListener('click', () => {
+    navigate('create-ticket');
+  });
 
   // Type filter — switching type returns to the first page
   const typeBar = page.querySelector('#type-filters');

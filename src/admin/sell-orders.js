@@ -13,6 +13,7 @@ export function renderAdminSellOrders() {
 
   let activeFilter = 'All';
   let orders = [];
+  let detailOverlay = null;
 
   page.innerHTML = `
     <h1 class="page-title">Sell Orders</h1>
@@ -114,6 +115,7 @@ export function renderAdminSellOrders() {
   function showOrderDetail(o) {
     const overlay = document.createElement('div');
     overlay.className = 'fixed inset-0 z-[90] flex items-end justify-center bg-black/40 backdrop-blur-sm md:items-center';
+    detailOverlay = overlay;
 
     const modal = document.createElement('div');
     modal.className = 'card w-full max-w-md max-h-[85vh] overflow-y-auto p-6 step-enter md:rounded-3xl';
@@ -144,8 +146,8 @@ export function renderAdminSellOrders() {
     `;
 
     modal.querySelector('#detail-badge').appendChild(StatusBadge({ status: o.status }));
-    modal.querySelector('#close-detail').addEventListener('click', () => overlay.remove());
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+    modal.querySelector('#close-detail').addEventListener('click', () => { overlay.remove(); detailOverlay = null; });
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) { overlay.remove(); detailOverlay = null; } });
 
     // Actions
     const actionsEl = modal.querySelector('#detail-actions');
@@ -167,14 +169,6 @@ export function renderAdminSellOrders() {
         showConfirm(modal, 'Reject Order', 'Release reserved USDT and mark order as rejected?', 'Reject', true, () => handleReject(o.id, 'REJECTED', modal, overlay));
       });
       actionsEl.appendChild(rejectBtn);
-
-      const cancelBtn = document.createElement('button');
-      cancelBtn.className = 'btn-secondary w-full text-red-600 dark:text-red-400';
-      cancelBtn.textContent = 'Cancel Order';
-      cancelBtn.addEventListener('click', () => {
-        showConfirm(modal, 'Cancel Order', 'Release reserved USDT and mark order as cancelled?', 'Cancel', true, () => handleReject(o.id, 'CANCELLED', modal, overlay));
-      });
-      actionsEl.appendChild(cancelBtn);
     }
 
     overlay.appendChild(modal);
@@ -243,7 +237,12 @@ export function renderAdminSellOrders() {
       }
       showFeedback(modal, 'Order completed successfully', 'green');
       refreshWalletBalance();
-      setTimeout(() => { overlay.remove(); loadOrders(); }, 800);
+      // Close both the checklist overlay and the detail overlay
+      setTimeout(() => {
+        overlay.remove();
+        if (detailOverlay) { detailOverlay.remove(); detailOverlay = null; }
+        loadOrders();
+      }, 800);
     } catch {
       showFeedback(modal, 'Verification cancelled', 'amber');
     }
@@ -251,16 +250,20 @@ export function renderAdminSellOrders() {
 
   async function handleReject(orderId, status, modal, overlay) {
     try {
-      const verificationId = await requireVerification(status === 'REJECTED' ? 'Reject Order' : 'Cancel Order', 'admin_financial');
+      const verificationId = await requireVerification('Reject Order', 'admin_financial');
       showFeedback(modal, 'Processing...', 'amber');
       const { error } = await supabase.rpc('admin_reject_sell_order', { p_order_id: orderId, p_status: status, p_verification_id: verificationId });
       if (error) {
         showFeedback(modal, error.message, 'red');
         return;
       }
-      showFeedback(modal, `Order ${status.toLowerCase()}`, 'green');
+      showFeedback(modal, 'Order rejected', 'green');
       refreshWalletBalance();
-      setTimeout(() => { overlay.remove(); loadOrders(); }, 800);
+      setTimeout(() => {
+        overlay.remove();
+        if (detailOverlay) { detailOverlay.remove(); detailOverlay = null; }
+        loadOrders();
+      }, 800);
     } catch {
       showFeedback(modal, 'Verification cancelled', 'amber');
     }

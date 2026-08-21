@@ -76,6 +76,9 @@ All user-facing tables have RLS enabled. Policies ensure users can only access t
 | `admin_users` | Active admin can read own row | Admin can update own row |
 | `deposit_methods` | Admins can read all; authenticated users can read active methods | None (admin-only writes) |
 | `notifications` | `auth.uid() = user_id` | `auth.uid() = user_id` (mark read only) |
+| `support_agent_status` | `agent_id = auth.uid()` | None (writes via RPC) |
+| `support_chat_sessions` | `user_id = auth.uid() OR agent_id = auth.uid()` | None (writes via RPC) |
+| `support_chat_messages` | Participant check (session user or agent) | None (writes via RPC) |
 
 ### Tables with No Client Access
 These tables have all client roles explicitly revoked:
@@ -91,6 +94,18 @@ These tables have all client roles explicitly revoked:
 - **Duplicate protection** — partial unique index on `(user_id, event_type, reference_id)` WHERE `reference_id IS NOT NULL`, plus a dedup check inside `create_notification`; RPC retries, polling, and tab changes cannot create duplicates
 - **Admin isolation** — `notify_admins()` loops over `admin_users WHERE is_active = true`; each admin receives their own row, and RLS ensures users/admins can only read and mark their own notifications
 - **Database timestamps** — `created_at`/`read_at` use `now()` server-side; the browser clock is never trusted
+
+### Live Chat Security (Phase 22–23)
+- **User isolation** — RLS ensures users can only SELECT their own chat sessions and messages (sessions where `user_id = auth.uid()` or `agent_id = auth.uid()`)
+- **Cross-user protection** — Users cannot access another user's chat sessions or messages; message SELECT uses an EXISTS subquery checking session participation
+- **No client writes** — All INSERT/UPDATE/DELETE on chat tables revoked from `anon, authenticated, public`; writes go exclusively through `SECURITY DEFINER` RPCs
+- **Admin authorization** — All admin chat RPCs (`support_set_agent_status`, `support_accept_chat`, `support_admin_get_waiting_chats`, `support_admin_get_active_chats`, `support_admin_get_chat_stats`, `support_agent_heartbeat`) check `is_admin_user()` before proceeding
+- **Participant-only messaging** — `support_send_chat_message` validates the caller is the session's user or assigned agent before inserting
+- **Queue manipulation prevention** — Queue position is computed server-side; users cannot modify their own queue position
+- **Agent status protection** — Non-admin users cannot modify agent status (INSERT/UPDATE revoked; RPC requires `is_admin_user()`)
+- **Heartbeat enforcement** — Stale agents (>3 minutes without heartbeat) are excluded from availability calculations and cannot receive new chat assignments
+- **Duplicate chat prevention** — Partial unique index `uq_chat_sessions_one_active_per_user` ensures a user can never have more than one WAITING or ACTIVE session simultaneously
+- **Notification integration** — Chat events (assigned, message, ended) create notifications atomically within the same RPC transaction
 
 ---
 
@@ -287,3 +302,7 @@ Audit records include `actor_id`, `target_type`, `target_id`, and `metadata` (JS
 | **Audit Trail** | Immutable `audit_logs` table, written by every RPC function |
 | **Ledger Integrity** | Append-only, mutation trigger blocks UPDATE/DELETE |
 | **Encryption** | AES-256-GCM for TOTP secrets at rest, version-aware for key rotation |
+| **Live Chat RLS** | Per-user session/message isolation, participant-only access |
+| **Chat Agent Auth** | `is_admin_user()` required for all agent operations |
+| **Chat Heartbeat** | 60s heartbeat, 3-min stale threshold, stale agents excluded from assignment |
+| **Duplicate Chat Guard** | Partial unique index prevents multiple WAITING/ACTIVE sessions per user |

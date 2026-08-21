@@ -12,6 +12,8 @@ const eventConfig = {
   new_sell_order:       { icon: '↑',  color: 'text-blue-500',    bg: 'bg-blue-500/10' },
   sell_order_completed: { icon: '✓',  color: 'text-green-500',   bg: 'bg-green-500/10' },
   sell_order_rejected:  { icon: '✕',  color: 'text-red-500',     bg: 'bg-red-500/10' },
+  chat_message:         { icon: '💬', color: 'text-blue-500',    bg: 'bg-blue-500/10' },
+  chat_ended:           { icon: '✓',  color: 'text-text-secondary', bg: 'bg-black/[0.04]' },
   _default:             { icon: '•',  color: 'text-text-secondary', bg: 'bg-black/[0.04]' },
 };
 

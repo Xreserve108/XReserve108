@@ -179,7 +179,7 @@ export function setupSellInteractions(container) {
 //   server-side atomic order creation (create_sell_order RPC).
 // =============================================================================
 
-function openSellWorkflow(page, amount, rate, onSold) {
+export function openSellWorkflow(page, amount, rate, onSold) {
   const clientToken = newClientToken();
   let selectedAccount = null;
   let loadedAccounts = [];
@@ -466,6 +466,7 @@ function openSellWorkflow(page, amount, rate, onSold) {
       <div class="mt-3 rounded-xl bg-amber-500/10 px-4 py-3">
         <p class="text-[12px] leading-relaxed text-amber-600 dark:text-amber-400">Payment processing time may vary from 30 minutes to 180 minutes depending on availability of funds.</p>
       </div>
+      <button id="wf-support-link" class="w-full text-center text-[12px] text-text-secondary dark:text-text-secondary-dark hover:text-text-primary dark:hover:text-text-primary-dark transition-colors mt-2">Need help? Create a support ticket</button>
     `;
 
     footer.innerHTML = `
@@ -481,6 +482,10 @@ function openSellWorkflow(page, amount, rate, onSold) {
     footer.querySelector('#wf-view-orders').addEventListener('click', () => {
       close();
       navigate('orders');
+    });
+    content.querySelector('#wf-support-link')?.addEventListener('click', () => {
+      close();
+      navigate('create-ticket?ctx=sell-order&ref=' + encodeURIComponent(orderId || ''));
     });
   }
 

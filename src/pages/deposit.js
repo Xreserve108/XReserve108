@@ -583,6 +583,7 @@ export function renderDeposit() {
     actions.innerHTML = `
       <button class="btn-primary w-full" id="view-pending-btn">View Pending Transactions</button>
       <button class="btn-secondary w-full" id="back-to-wallet-btn">Back to Wallet</button>
+      <button class="w-full text-center text-[13px] text-text-secondary dark:text-text-secondary-dark hover:text-text-primary dark:hover:text-text-primary-dark transition-colors mt-1" id="success-support-link">Need help? Create a support ticket</button>
     `;
     content.appendChild(actions);
 
@@ -596,6 +597,9 @@ export function renderDeposit() {
     });
     content.querySelector('#back-to-wallet-btn').addEventListener('click', () => {
       navigate('wallet');
+    });
+    content.querySelector('#success-support-link').addEventListener('click', () => {
+      navigate('create-ticket?ctx=deposit');
     });
   }
 
@@ -677,6 +681,7 @@ export function renderDeposit() {
     actions.innerHTML = `
       <button class="btn-secondary w-full" id="refresh-pending">Refresh</button>
       <button class="btn-secondary w-full" id="back-to-networks">New Deposit</button>
+      <button class="w-full text-center text-[13px] text-text-secondary dark:text-text-secondary-dark hover:text-text-primary dark:hover:text-text-primary-dark transition-colors mt-1" id="pending-support-link">Need help with a deposit? Create a support ticket</button>
     `;
     content.appendChild(actions);
 
@@ -689,6 +694,9 @@ export function renderDeposit() {
     content.querySelector('#back-to-networks').addEventListener('click', () => {
       screen = 'networks';
       render();
+    });
+    content.querySelector('#pending-support-link').addEventListener('click', () => {
+      navigate('create-ticket?ctx=deposit');
     });
   }
 

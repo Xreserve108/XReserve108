@@ -27,12 +27,21 @@ The app uses a custom hash-based SPA router (`src/core/router.js`). Routes are r
 | `signup` | `renderSignUp` | No | No | user |
 | `security` | `renderSecurity` | Yes | No | user |
 | `notifications` | `renderNotifications` | Yes | No | user |
+| `help-support` | `renderHelpSupport` | Yes | No | user |
+| `live-chat` | `renderLiveChat` | Yes | No | user |
+| `chat-history` | `renderChatHistory` | Yes | No | user |
+| `my-tickets` | `renderMyTickets` | Yes | No | user |
+| `create-ticket` | `renderCreateTicket` | Yes | No | user |
+| `ticket-detail` | `renderTicketDetail` | Yes | No | user |
 | `admin` | `renderAdminDashboard` | Yes | Yes | admin |
 | `admin/deposits` | `renderAdminDeposits` | Yes | Yes | admin |
 | `admin/sell-orders` | `renderAdminSellOrders` | Yes | Yes | admin |
 | `admin/users` | Placeholder | Yes | Yes | admin |
 | `admin/settings` | `renderAdminSettings` (tabbed) | Yes | Yes | admin |
 | `admin/notifications` | `renderAdminNotifications` | Yes | Yes | admin |
+| `admin/help-support` | `renderAdminHelpSupport` | Yes | Yes | admin |
+| `admin/live-chat` | `renderAdminLiveChat` | Yes | Yes | admin |
+| `admin/tickets` | `renderAdminTickets` | Yes | Yes | admin |
 
 ### Router Guards
 
@@ -168,6 +177,56 @@ registerRoute('routeName', {
 - Unread count badge in navigation header (from `get_unread_notification_count` RPC)
 - Empty state when no notifications exist
 
+### `help-support.js` — Help & Support Hub
+- Live support availability display (calls `support_get_chat_availability` RPC)
+- Shows agent availability status with live indicator (green/yellow/red)
+- Estimated wait time display
+- "Start Live Chat" / "Join Queue" / "No Agents Available" button based on availability
+- If user has an active chat: shows "Return to Chat" button
+- If user has a waiting chat: shows "View Queue Status" button
+- Link to chat history
+- Calls: `support_get_chat_availability`, `support_start_live_chat`, `support_get_user_active_chat`
+
+### `live-chat.js` — Live Support Chat (User)
+- Real-time chat interface with message bubbles
+- Three views: queue (waiting), active chat, ended
+- Queue view: shows position, polls for agent assignment every 5s
+- Active chat: loads message history via `support_get_chat_history`, subscribes to Realtime
+- Optimistic message sending (shows immediately, removes on error)
+- Auto-scroll to latest messages
+- "End Chat" button with confirmation dialog
+- Realtime events via `xreserve:chat-message` and `xreserve:chat-status` custom events
+- Marks messages as read via `support_mark_chat_read` on load and new message
+- Calls: `support_start_live_chat`, `support_get_chat_history`, `support_send_chat_message`, `support_mark_chat_read`, `support_end_chat`, `support_get_user_queue_position`, `support_get_user_active_chat`
+
+### `chat-history.js` — Chat History
+- Lists user's past ended/abandoned chat sessions
+- Each card shows date, duration, message count, status badge
+- Click to open full-screen overlay with message conversation
+- Loads messages via `support_get_chat_history`
+- Calls: `support_get_user_chat_history`, `support_get_chat_history`
+
+### `my-tickets.js` — My Tickets
+- User ticket list with 6 filter tabs: All, Open, In Progress, Waiting, Resolved, Closed
+- Each ticket card shows ticket_number, subject, category, status badge, priority, relative time, unread dot
+- Calls `support_get_user_tickets` RPC with pagination
+- Click navigates to `ticket-detail?id=<uuid>`
+
+### `create-ticket.js` — Create Support Ticket
+- Form with: Category (select), Subject (input), Description (textarea), Transaction Hash (optional)
+- Contextual support via URL hash params: `#create-ticket?ctx=deposit&ref=<uuid>` or `?ctx=sell-order&ref=<uuid>`
+- Auto-selects category based on context type
+- Loads deposit/sell_order details to show reference info when context is provided
+- Calls `support_create_ticket` RPC, navigates to ticket detail on success
+
+### `ticket-detail.js` — Ticket Detail (User)
+- Ticket header with number, status badge, subject, category, priority, dates
+- Conversation messages (initial description + replies)
+- Reply area with textarea and Send button (calls `support_reply_to_ticket`)
+- "Reopen Ticket" button for RESOLVED tickets (calls `support_reopen_ticket`)
+- Marks messages read via `support_mark_ticket_read`
+- Calls `support_get_user_ticket` RPC
+
 ---
 
 ## Admin Pages (`src/admin/`)
@@ -216,6 +275,29 @@ registerRoute('routeName', {
 - Unread count badge in admin navigation (from `get_unread_notification_count` RPC)
 - Empty state when no notifications exist
 
+### `live-chat.js` — Admin Live Chat Center
+- Agent status control (AVAILABLE / BUSY / OFFLINE dropdown)
+- Heartbeat management: starts 60s heartbeat when AVAILABLE/BUSY, stops when OFFLINE
+- Dashboard view: stats grid (active, waiting, available agents), waiting chats list, active chats list
+- Accept button on waiting chats (FIFO via `support_accept_chat`)
+- Conversation view: full chat interface with message history, realtime message delivery, send/reply
+- Realtime subscriptions for new messages (INSERT on `support_chat_messages`) and session status (UPDATE on `support_chat_sessions`)
+- End chat with confirmation dialog
+- Periodic dashboard refresh (8s interval)
+- Calls: `support_get_agent_status`, `support_set_agent_status`, `support_agent_heartbeat`, `support_admin_get_chat_stats`, `support_admin_get_waiting_chats`, `support_admin_get_active_chats`, `support_accept_chat`, `support_get_chat_history`, `support_send_chat_message`, `support_mark_chat_read`, `support_end_chat`
+
+### `tickets.js` — Admin Support Ticket Center
+- Dashboard view: 7 stat cards (Open, In Progress, Waiting User, Waiting Support, Resolved, Closed, Unassigned)
+- Filters: status, category, priority, sort (updated/newest/oldest/priority), search input with debounce
+- Ticket list rows show: ticket_number, username, status badge, priority, subject, category, time
+- Detail view: ticket info card with admin controls (status select, priority select, assign button, save changes)
+- Conversation display with sender names and timestamps
+- Admin reply textarea (calls `support_admin_reply_to_ticket`)
+- Internal notes section (yellow-tinted cards, "admin only" label) — calls `support_admin_add_note`
+- Auto-refresh every 10 seconds on dashboard view
+- MutationObserver for cleanup of refresh timer
+- Calls: `support_admin_get_tickets`, `support_admin_get_ticket`, `support_admin_assign_ticket`, `support_admin_reply_to_ticket`, `support_admin_add_note`, `support_admin_update_ticket_status`, `support_admin_update_ticket_priority`, `support_admin_get_ticket_stats`, `support_admin_mark_ticket_read`
+
 ---
 
 ## Data Modules (`src/data/`)
@@ -252,6 +334,13 @@ registerRoute('routeName', {
 | `ChangeRateDialog` | `admin/ChangeRateDialog.js` | Multi-step exchange rate change flow: input → review → `admin_settings` 2FA → final confirm → `admin_update_exchange_rate` RPC → success |
 | `MarketPulse` | `MarketPulse.js` | Live USDT/INR market reference widget (labeled "Market reference") with XReserve rate + info tooltip. Each exchange row shows a brand logo (Binance yellow diamond, OKX four squares, Bybit stylized B) followed by the exchange name in semibold weight |
 | Navigation | `navigation.js` | Bottom nav, top bar, desktop sidebar |
+
+### Shared Libraries (`src/lib/`)
+
+| Module | File | Description |
+|---|---|---|
+| Chat | `chat.js` | Live chat state management, floating chat icon, Realtime subscriptions, active chat polling (20s interval), unread badge, visibility-aware focus tracking |
+| Supabase | `supabase.js` | Supabase client initialization |
 
 ### Navigation System
 - **Bottom nav** — Mobile-only fixed bar (4 items: Home, Wallet, Sell, Orders)

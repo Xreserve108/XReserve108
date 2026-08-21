@@ -1,6 +1,6 @@
 # Database Schema
 
-All database objects live in PostgreSQL via Supabase. The schema is managed through 20 sequential migration files in `supabase/migrations/`.
+All database objects live in PostgreSQL via Supabase. The schema is managed through 24 sequential migration files in `supabase/migrations/`.
 
 ---
 
@@ -302,6 +302,73 @@ Single-use verification tokens issued after TOTP verification.
 
 ---
 
+### `support_agent_status`
+Agent availability for live support chat (Phase 22, hardened Phase 23).
+
+| Column | Type | Notes |
+|---|---|---|
+| `agent_id` | UUID PK FK | References `auth.users(id)` ON DELETE CASCADE |
+| `status` | TEXT | `AVAILABLE`, `BUSY`, `OFFLINE` (default `OFFLINE`) |
+| `max_chats` | INT | Default `3`, CHECK > 0 AND <= 10 |
+| `last_heartbeat_at` | TIMESTAMPTZ | Default `now()`, updated by heartbeat RPC (Phase 23) |
+| `updated_at` | TIMESTAMPTZ | Auto |
+
+**RLS**: Agents can SELECT only their own row (`agent_id = auth.uid()`). All writes through `SECURITY DEFINER` RPCs.
+
+---
+
+### `support_chat_sessions`
+Chat sessions between users and admin agents (Phase 22).
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | UUID PK | `gen_random_uuid()` |
+| `user_id` | UUID FK | References `auth.users(id)` ON DELETE CASCADE |
+| `agent_id` | UUID FK | References `auth.users(id)` ON DELETE SET NULL |
+| `status` | TEXT | `WAITING`, `ACTIVE`, `ENDED`, `ABANDONED` (default `WAITING`) |
+| `queue_position` | INT | Position in queue (computed) |
+| `connected_at` | TIMESTAMPTZ | When agent connected |
+| `ended_at` | TIMESTAMPTZ | When chat ended |
+| `created_at` | TIMESTAMPTZ | Auto |
+| `updated_at` | TIMESTAMPTZ | Auto-updated via trigger |
+| `user_unread_count` | INT | Default `0` |
+| `admin_unread_count` | INT | Default `0` |
+| `last_user_read_at` | TIMESTAMPTZ | Last user read timestamp |
+| `last_admin_read_at` | TIMESTAMPTZ | Last admin read timestamp |
+
+**Indexes**:
+- `idx_chat_sessions_user_id` — `(user_id, created_at DESC)`
+- `idx_chat_sessions_agent_id` — `(agent_id)` WHERE `status = 'ACTIVE'`
+- `idx_chat_sessions_waiting` — `(created_at ASC)` WHERE `status = 'WAITING'`
+- `idx_chat_sessions_status` — `(status)`
+- `uq_chat_sessions_one_active_per_user` — partial unique index on `(user_id)` WHERE `status IN ('WAITING', 'ACTIVE')` (Phase 23)
+
+**RLS**: Authenticated users can SELECT sessions where they are the user or the agent. All writes through `SECURITY DEFINER` RPCs.
+
+---
+
+### `support_chat_messages`
+Individual messages within chat sessions (Phase 22).
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | UUID PK | `gen_random_uuid()` |
+| `session_id` | UUID FK | References `support_chat_sessions(id)` ON DELETE CASCADE |
+| `sender_id` | UUID FK | References `auth.users(id)` |
+| `sender_type` | TEXT | `user` or `admin` |
+| `body` | TEXT | CHECK length > 0 AND <= 4000 |
+| `created_at` | TIMESTAMPTZ | Auto |
+| `read_at` | TIMESTAMPTZ | When message was read |
+
+**Indexes**:
+- `idx_chat_messages_session_id` — `(session_id, created_at ASC)`
+
+**Realtime**: Added to `supabase_realtime` publication for live message delivery.
+
+**RLS**: Authenticated users can SELECT messages belonging to sessions they participate in (user or agent). All inserts through `SECURITY DEFINER` RPCs.
+
+---
+
 ## RPC Functions
 
 ### User-Facing (authenticated users can call)
@@ -318,6 +385,32 @@ Single-use verification tokens issued after TOTP verification.
 | `mark_notification_read(id)` | Mark a notification as read | No (auth required) |
 | `mark_all_notifications_read()` | Mark all user notifications as read | No (auth required) |
 | `get_unread_notification_count()` | Get count of unread notifications | No (auth required) |
+
+### Live Support Chat (authenticated users)
+
+| Function | Purpose | Admin Only |
+|---|---|---|
+| `support_get_chat_availability()` | Agent count, queue size, wait estimate (excludes stale agents) | No |
+| `support_start_live_chat()` | Start or resume a chat session (auto-assigns fresh-heartbeat agents) | No |
+| `support_get_user_active_chat()` | Get user's current ACTIVE/WAITING chat | No |
+| `support_get_user_queue_position(session_id)` | Get user's position in the queue | No |
+| `support_get_chat_history(session_id, limit, offset)` | Get messages for a chat session (participant or admin) | No |
+| `support_get_user_chat_history()` | List user's ended/abandoned chat sessions | No |
+| `support_send_chat_message(session_id, body)` | Send a message in an active chat | No |
+| `support_mark_chat_read(session_id)` | Mark all messages in a chat as read for the caller | No |
+| `support_end_chat(session_id)` | End a chat session (user or admin) | No |
+
+### Live Support Chat (admin agents only)
+
+| Function | Purpose | Scope |
+|---|---|---|
+| `support_set_agent_status(status)` | Set agent availability (AVAILABLE/BUSY/OFFLINE), refreshes heartbeat | `is_admin_user()` |
+| `support_get_agent_status()` | Get agent's current status | `is_admin_user()` |
+| `support_agent_heartbeat()` | Update heartbeat timestamp (keeps agent from going stale) | `is_admin_user()` |
+| `support_accept_chat()` | Accept oldest WAITING chat (FIFO) | `is_admin_user()` |
+| `support_admin_get_waiting_chats()` | List all WAITING sessions with user info | `is_admin_user()` |
+| `support_admin_get_active_chats()` | List all ACTIVE sessions with agent info | `is_admin_user()` |
+| `support_admin_get_chat_stats()` | Dashboard counts (active, waiting, available agents with fresh heartbeat) | `is_admin_user()` |
 
 ### Admin-Only (require `is_admin_user()` + admin 2FA)
 
@@ -352,6 +445,12 @@ Single-use verification tokens issued after TOTP verification.
 | `create_notification(user_id, event_type, title, description, metadata, reference_id)` | Create notification with dedup protection |
 | `notify_admins(event_type, title, description, metadata, reference_id, exclude_user_id)` | Create notification for all active admins |
 
+### Live Support Chat Internal Helpers
+
+| Function | Purpose |
+|---|---|
+| `_support_chat_updated_trigger()` | Trigger: auto-update `updated_at` on `support_chat_sessions` |
+
 ---
 
 ## Triggers
@@ -366,6 +465,90 @@ Single-use verification tokens issued after TOTP verification.
 | `trg_admin_users_updated_at` | `admin_users` | BEFORE UPDATE | `set_updated_at()` |
 | `trg_deposit_methods_updated_at` | `deposit_methods` | BEFORE UPDATE | `set_updated_at()` |
 | `trg_block_ledger_mutation` | `ledger_entries` | BEFORE UPDATE OR DELETE | `block_ledger_mutation()` — raises exception |
+| `trg_support_chat_updated` | `support_chat_sessions` | BEFORE UPDATE | `_support_chat_updated_trigger()` — auto-updates `updated_at` |
+| `trg_support_ticket_updated` | `support_tickets` | BEFORE UPDATE | `set_updated_at()` |
+
+---
+
+## Support Tickets (Migration 024)
+
+### `support_tickets`
+Asynchronous support ticket headers.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | UUID PK | `gen_random_uuid()` |
+| `ticket_number` | TEXT UNIQUE | Sequence-based `XR-NNNN` (starts at 1001) |
+| `user_id` | UUID FK | References `auth.users(id)` |
+| `assigned_agent_id` | UUID FK | Nullable, references `auth.users(id)` |
+| `category` | TEXT | CHECK: Deposit, Sell Order, Account, 2FA / Security, Wallet, Transaction, Other |
+| `subject` | TEXT | 1–200 chars |
+| `description` | TEXT | 1–5000 chars |
+| `status` | TEXT | CHECK: OPEN, IN_PROGRESS, WAITING_FOR_USER, WAITING_FOR_SUPPORT, RESOLVED, CLOSED |
+| `priority` | TEXT | CHECK: LOW, NORMAL, HIGH, URGENT (default NORMAL) |
+| `related_deposit_id` | UUID FK | Nullable, references `deposits(id)` |
+| `related_sell_order_id` | UUID FK | Nullable, references `sell_orders(id)` |
+| `reference_hash` | TEXT | Optional TX hash reference |
+| `chat_session_id` | UUID FK | Nullable, references `support_chat_sessions(id)` |
+| `resolved_at` | TIMESTAMPTZ | Set when status → RESOLVED |
+| `closed_at` | TIMESTAMPTZ | Set when status → CLOSED |
+| `created_at` | TIMESTAMPTZ | Auto |
+| `updated_at` | TIMESTAMPTZ | Auto-updated via trigger |
+
+**RLS**: Enabled. Users SELECT only their own tickets (`user_id = auth.uid()`).
+
+### `support_ticket_messages`
+Conversation messages between users and support agents.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | UUID PK | `gen_random_uuid()` |
+| `ticket_id` | UUID FK | References `support_tickets(id)` ON DELETE CASCADE |
+| `sender_id` | UUID FK | References `auth.users(id)` |
+| `body` | TEXT | 1–10000 chars |
+| `read_at` | TIMESTAMPTZ | Nullable, set when read by the other party |
+| `created_at` | TIMESTAMPTZ | Auto |
+
+**RLS**: Enabled. Users SELECT only messages on their own tickets (via EXISTS subquery).
+
+### `support_ticket_internal_notes`
+Admin-only notes invisible to users.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | UUID PK | `gen_random_uuid()` |
+| `ticket_id` | UUID FK | References `support_tickets(id)` ON DELETE CASCADE |
+| `author_id` | UUID FK | References `auth.users(id)` |
+| `note` | TEXT | 1–5000 chars |
+| `created_at` | TIMESTAMPTZ | Auto |
+
+**RLS**: Enabled. No user-facing SELECT policy — accessible only via SECURITY DEFINER admin RPCs.
+
+### Support Ticket RPCs
+
+**User RPCs** (7):
+| Function | Returns | Description |
+|---|---|---|
+| `support_create_ticket(...)` | `{ticket_id, ticket_number}` | Create a new ticket, notifies admins |
+| `support_get_user_tickets(...)` | SETOF JSONB | Paginated list with optional status filter |
+| `support_get_user_ticket(p_ticket_id)` | JSONB | Full ticket with messages (ownership-checked) |
+| `support_reply_to_ticket(p_ticket_id, p_body)` | JSONB | User reply, notifies assigned agent or admins |
+| `support_mark_ticket_read(p_ticket_id)` | INT | Mark messages read, returns count |
+| `support_reopen_ticket(p_ticket_id)` | BOOLEAN | Reopen a RESOLVED ticket |
+| `support_get_user_ticket_summary()` | JSONB | Counts of open/waiting/resolved tickets |
+
+**Admin RPCs** (9):
+| Function | Returns | Description |
+|---|---|---|
+| `support_admin_get_tickets(...)` | SETOF JSONB | Paginated, filterable, searchable ticket list |
+| `support_admin_get_ticket(p_ticket_id)` | JSONB | Full ticket with messages, notes, user info |
+| `support_admin_assign_ticket(p_ticket_id, p_agent_id)` | BOOLEAN | Assign/reassign ticket to agent |
+| `support_admin_reply_to_ticket(p_ticket_id, p_body)` | JSONB | Agent reply, notifies user |
+| `support_admin_add_note(p_ticket_id, p_note)` | JSONB | Add internal note (invisible to users) |
+| `support_admin_update_ticket_status(p_ticket_id, p_status)` | BOOLEAN | Change status with notifications |
+| `support_admin_update_ticket_priority(p_ticket_id, p_priority)` | BOOLEAN | Change priority |
+| `support_admin_get_ticket_stats()` | TABLE | Dashboard statistics (counts by status) |
+| `support_admin_mark_ticket_read(p_ticket_id)` | INT | Mark messages read as agent |
 
 ---
 

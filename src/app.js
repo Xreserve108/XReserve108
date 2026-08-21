@@ -12,6 +12,7 @@ import { renderSignIn } from '@/pages/signin';
 import { renderSignUp } from '@/pages/signup';
 import { renderSecurity } from '@/pages/security';
 import { renderPaymentMethods } from '@/pages/payment-methods';
+import { renderPersonalDetails } from '@/pages/personal-details';
 
 import { renderAdminDashboard } from '@/admin/dashboard';
 import { renderAdminDeposits } from '@/admin/deposits';
@@ -19,9 +20,19 @@ import { renderAdminSellOrders } from '@/admin/sell-orders';
 import { renderAdminSecurity, renderAdminSecurityContent } from '@/admin/security';
 import { renderDepositMethods, renderDepositMethodsContent } from '@/admin/deposit-methods';
 import { renderAdminProfile } from '@/admin/profile';
+import { renderAdminPersonalDetails } from '@/admin/personal-details';
 import { stopAdminBadges } from '@/admin/notifications';
 import { renderNotifications } from '@/pages/notifications';
 import { renderAdminNotifications } from '@/admin/notifications-page';
+import { renderHelpSupport } from '@/pages/help-support';
+import { renderLiveChat } from '@/pages/live-chat';
+import { renderChatHistory } from '@/pages/chat-history';
+import { renderAdminLiveChat, renderAdminHelpSupport } from '@/admin/live-chat';
+import { renderAdminTickets } from '@/admin/tickets';
+import { renderMyTickets } from '@/pages/my-tickets';
+import { renderCreateTicket } from '@/pages/create-ticket';
+import { renderTicketDetail } from '@/pages/ticket-detail';
+import { startChatPolling, stopChatPolling } from '@/lib/chat';
 
 let currentLayout = null;
 let adminState = false;
@@ -86,7 +97,14 @@ function registerRoutes() {
   registerRoute('signup', { render: renderSignUp });
   registerRoute('security', { render: renderSecurity, protected: true });
   registerRoute('payment-methods', { render: renderPaymentMethods, protected: true });
+  registerRoute('personal-details', { render: renderPersonalDetails, protected: true });
   registerRoute('notifications', { render: renderNotifications, protected: true });
+  registerRoute('help-support', { render: renderHelpSupport, protected: true });
+  registerRoute('live-chat', { render: renderLiveChat, protected: true });
+  registerRoute('chat-history', { render: renderChatHistory, protected: true });
+  registerRoute('my-tickets', { render: renderMyTickets, protected: true });
+  registerRoute('create-ticket', { render: renderCreateTicket, protected: true });
+  registerRoute('ticket-detail', { render: renderTicketDetail, protected: true });
 
   // Admin routes
   registerRoute('admin', {
@@ -125,6 +143,12 @@ function registerRoutes() {
     layout: 'admin',
     onMount: () => updateAdminNav(),
   });
+  registerRoute('admin/personal-details', {
+    render: renderAdminPersonalDetails,
+    admin: true,
+    layout: 'admin',
+    onMount: () => updateAdminNav(),
+  });
   registerRoute('admin/security', {
     render: renderAdminSecurity,
     admin: true,
@@ -139,6 +163,24 @@ function registerRoutes() {
   });
   registerRoute('admin/notifications', {
     render: renderAdminNotifications,
+    admin: true,
+    layout: 'admin',
+    onMount: () => updateAdminNav(),
+  });
+  registerRoute('admin/live-chat', {
+    render: renderAdminLiveChat,
+    admin: true,
+    layout: 'admin',
+    onMount: () => updateAdminNav(),
+  });
+  registerRoute('admin/help-support', {
+    render: renderAdminHelpSupport,
+    admin: true,
+    layout: 'admin',
+    onMount: () => updateAdminNav(),
+  });
+  registerRoute('admin/tickets', {
+    render: renderAdminTickets,
     admin: true,
     layout: 'admin',
     onMount: () => updateAdminNav(),

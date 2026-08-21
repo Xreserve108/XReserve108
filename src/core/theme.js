@@ -14,12 +14,12 @@ function applyTheme(theme) {
 
 export function initTheme() {
   const stored = localStorage.getItem(THEME_KEY);
-  const theme = stored || getSystemPreference();
+  const theme = stored || 'light';
   applyTheme(theme);
 
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
     if (!localStorage.getItem(THEME_KEY)) {
-      applyTheme(e.matches ? 'dark' : 'light');
+      applyTheme('light');
     }
   });
 }

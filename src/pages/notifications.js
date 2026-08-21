@@ -13,6 +13,17 @@ const eventConfig = {
   sell_order_completed:   { icon: '✓', color: 'text-green-500',   bg: 'bg-green-500/10' },
   sell_order_rejected:    { icon: '✕', color: 'text-red-500',     bg: 'bg-red-500/10' },
   sell_order_cancelled:   { icon: '✕', color: 'text-red-500',     bg: 'bg-red-500/10' },
+  chat_assigned:          { icon: '💬', color: 'text-green-500',  bg: 'bg-green-500/10' },
+  chat_message:           { icon: '💬', color: 'text-blue-500',   bg: 'bg-blue-500/10' },
+  chat_ended:             { icon: '✓', color: 'text-text-secondary', bg: 'bg-black/[0.04]' },
+  new_support_ticket:     { icon: '🎫', color: 'text-blue-500', bg: 'bg-blue-500/10' },
+  ticket_support_replied: { icon: '🎫', color: 'text-blue-500', bg: 'bg-blue-500/10' },
+  ticket_status_changed:  { icon: '🎫', color: 'text-yellow-500', bg: 'bg-yellow-500/10' },
+  ticket_resolved:        { icon: '🎫', color: 'text-green-500', bg: 'bg-green-500/10' },
+  ticket_closed:          { icon: '🎫', color: 'text-text-secondary', bg: 'bg-black/[0.04]' },
+  ticket_assigned:        { icon: '🎫', color: 'text-blue-500', bg: 'bg-blue-500/10' },
+  ticket_reopened:        { icon: '🎫', color: 'text-yellow-500', bg: 'bg-yellow-500/10' },
+  ticket_user_replied:    { icon: '🎫', color: 'text-orange-500', bg: 'bg-orange-500/10' },
   // Fallback
   _default:               { icon: '•', color: 'text-text-secondary', bg: 'bg-black/[0.04]' },
 };

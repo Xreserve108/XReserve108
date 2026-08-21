@@ -7,7 +7,11 @@ import { initAuth, onAuthStateChange, isAdmin, signOut, openAuthGate, is2FAVerif
 import { initApp, setAdminState, rebuildUserLayout } from '@/app';
 import { navigate, refreshCurrentPage, getCurrentRoute, initRouter } from '@/core/router';
 import { getWalletBalance, startWalletHeartbeat, stopWalletHeartbeat } from '@/data/wallet-data';
+import { startChatPolling, stopChatPolling } from '@/lib/chat';
 import { supabase } from '@/lib/supabase';
+
+// Track last known admin status for logout cleanup (agent OFFLINE)
+let lastKnownIsAdmin = false;
 
 function formatAmount(num) {
   const n = Number(num);
@@ -91,12 +95,15 @@ function setupAuthListener() {
     if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') {
       const isAdm = await isAdmin();
       setAdminState(isAdm);
+      lastKnownIsAdmin = isAdm;
       // Start the global wallet heartbeat for authenticated users.
       // Safe to call on both events — startWalletHeartbeat() guards against
       // duplicate intervals. The heartbeat runs for all authenticated users
       // including admins (admin layout has no wallet pill, but the calls
       // are harmless no-ops in that context).
       startWalletHeartbeat();
+      // Start chat polling for floating icon (non-admin users only)
+      if (!isAdm) startChatPolling();
       // Always rebuild layout so the wallet control appears for non-admin users too
       rebuildUserLayout();
       if (isAdm) {
@@ -132,8 +139,17 @@ function setupAuthListener() {
         }
       }
     } else if (event === 'SIGNED_OUT') {
+      // If admin was logged in, attempt to mark agent OFFLINE
+      // (best-effort; the RPC will fail silently if session is already gone)
+      if (lastKnownIsAdmin) {
+        try {
+          await supabase.rpc('support_set_agent_status', { p_status: 'OFFLINE' });
+        } catch { /* session may already be cleared */ }
+        lastKnownIsAdmin = false;
+      }
       // Stop the global wallet heartbeat — no longer authenticated
       stopWalletHeartbeat();
+      stopChatPolling();
       setAdminState(false);
       if (route && route !== 'home' && route !== 'signin' && route !== 'profile') {
         navigate('home');

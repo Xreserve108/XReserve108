@@ -36,16 +36,20 @@
 │  │              │  │  - Audit logs    │  │  - verify-trc20-│  │
 │  │              │  │  - Deposit       │  │    deposit      │  │
 │  │              │  │    methods       │  │                 │  │
+│  │              │  │  - Live chat     │  │                 │  │
+│  │              │  │    support       │  │                 │  │
 │  └──────────────┘  └──────────────────┘  └─────────────────┘  │
 │                                                                 │
 │  ┌──────────────────────────────────────────────────────────┐  │
 │  │              Database Tables (PostgreSQL)                 │  │
 │  │                                                          │  │
 │  │  profiles · wallets · wallet_balances · ledger_entries   │  │
-│  │  deposits · sell_orders · exchange_settings              │  │
-│  │  deposit_methods · admin_users · audit_logs              │  │
-│  │  user_2fa · recovery_codes · user_2fa_verifications      │  │
-│  │  notifications                                           │  │
+│  │  deposits · sell_orders · exchange_settings             │  │
+│  │  deposit_methods · admin_users · audit_logs             │  │
+│  │  user_2fa · recovery_codes · user_2fa_verifications     │  │
+│  │  notifications                                          │  │
+│  │  support_agent_status · support_chat_sessions           │  │
+│  │  support_chat_messages                                  │  │
 │  └──────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -123,6 +127,40 @@ Deposit created (PENDING_VERIFICATION)
     → Admin can view full verification details via get_deposit_verification_details RPC
     → Admin completes 8-point manual verification checklist
     → admin_manually_verify_deposit RPC credits wallet atomically
+```
+
+### Live Support Chat Flow (Phase 22–23)
+
+```
+User navigates to Help & Support → availability checked (support_get_chat_availability)
+    → Shows agent availability, queue size, estimated wait
+    → User clicks "Start Live Chat" or "Join Queue"
+    → Frontend calls support_start_live_chat RPC
+    → RPC checks for existing ACTIVE/WAITING session (returns it if found)
+    → If no existing session:
+        → Finds AVAILABLE agent with fresh heartbeat (<3 min) and capacity
+        → If agent found: immediate assignment (status=ACTIVE)
+        → If no agent: create WAITING session with queue position
+    → Frontend subscribes to Realtime channels (messages + session status)
+    → Messages sent via support_send_chat_message RPC (SECURITY DEFINER)
+    → Realtime delivers INSERT events to subscribed clients
+    → Agent heartbeat (60s interval) keeps agent AVAILABLE
+    → Stale agents (>3 min no heartbeat) excluded from availability
+    → Chat ends via support_end_chat RPC → status=ENDED
+    → Notifications sent on assign, message, and end events
+```
+
+### Admin Agent Flow (Phase 22–23)
+
+```
+Admin navigates to Live Chat Center
+    → Sets agent status (AVAILABLE / BUSY / OFFLINE) via support_set_agent_status
+    → Heartbeat starts (60s interval) when AVAILABLE or BUSY
+    → Dashboard shows: active chats, waiting chats, agent stats
+    → Admin accepts waiting chat via support_accept_chat (FIFO)
+    → Conversation view with realtime message delivery
+    → Admin can send messages and end chats
+    → Heartbeat stops when agent goes OFFLINE
 ```
 
 ## Application Bootstrap Sequence
@@ -215,6 +253,9 @@ The app has two distinct layouts that are swapped dynamically by the router:
 | `018_admin_manual_verify_independent_path.sql` | Phase 18 | Independent admin manual verification path |
 | `019_credit_continuation_and_notification_counts.sql` | Phase 19 | Admin credit continuation + notification counts |
 | `020_notifications.sql` | Phase 20 | User & admin notification system with event wiring in financial RPCs |
+| `021_pre_reconstruction_cleanup.sql` | Phase 21 | Pre-reconstruction cleanup |
+| `022_live_support_chat.sql` | Phase 22 | Live support chat (agent status, sessions, messages, RLS, Realtime, 16 RPCs) |
+| `023_agent_heartbeat_race_hardening.sql` | Phase 23 | Agent heartbeat, stale-agent filtering, duplicate active-chat protection |
 
 ## Environment Variables
 

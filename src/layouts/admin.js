@@ -8,6 +8,8 @@ const adminNavItems = [
   { route: 'admin', label: 'Dashboard' },
   { route: 'admin/deposits', label: 'Deposits' },
   { route: 'admin/sell-orders', label: 'Sell Orders' },
+  { route: 'admin/live-chat', label: 'Live Chat' },
+  { route: 'admin/tickets', label: 'Tickets' },
   { route: 'admin/users', label: 'Users' },
 ];
 

@@ -57,6 +57,12 @@ export async function refreshWalletBalance() {
   if (sellEl) {
     sellEl.innerHTML = `${formatted} <span class="text-[13px] font-medium text-text-secondary dark:text-text-secondary-dark">USDT</span>`;
   }
+
+  // Homepage Instant Sell balance
+  const homeEl = document.getElementById('home-balance');
+  if (homeEl) {
+    homeEl.textContent = formatted;
+  }
 }
 
 function formatBalance(num) {
