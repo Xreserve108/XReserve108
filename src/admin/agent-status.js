@@ -29,36 +29,24 @@ let currentStatus  = null;
  * Initialise agent status for the admin session.
  * Called once from the auth lifecycle (main.js) when admin is detected.
  *
- * - If no row exists → default to AVAILABLE (solves "0 agents" problem).
- * - If status is BUSY → preserve (admin explicitly chose busy).
- * - Otherwise → ensure AVAILABLE and start heartbeat.
+ * An active admin session is automatically AVAILABLE.
+ * No manual status selection — the heartbeat proves the session is alive.
  *
  * Safe to call multiple times — guards prevent duplicate intervals.
  */
 export async function initAgentStatus() {
   try {
-    const { data: status, error } = await supabase.rpc('support_get_agent_status');
-    if (error) {
-      console.warn('[agent-status] get status failed:', error.message);
+    // Always set AVAILABLE — active admin session = available agent
+    const { error: setError } = await supabase.rpc('support_set_agent_status', { p_status: 'AVAILABLE' });
+    if (setError) {
+      console.warn('[agent-status] set AVAILABLE failed:', setError.message);
       return;
     }
-    currentStatus = status || 'OFFLINE';
+    currentStatus = 'AVAILABLE';
 
-    // Auto-activate unless admin explicitly chose BUSY
-    if (currentStatus !== 'BUSY') {
-      const { error: setError } = await supabase.rpc('support_set_agent_status', { p_status: 'AVAILABLE' });
-      if (setError) {
-        console.warn('[agent-status] set AVAILABLE failed:', setError.message);
-        return;
-      }
-      currentStatus = 'AVAILABLE';
-    }
-
-    // Heartbeat for AVAILABLE and BUSY (keeps last_heartbeat_at fresh)
-    if (currentStatus === 'AVAILABLE' || currentStatus === 'BUSY') {
-      startHeartbeat();
-      startWatchdog();
-    }
+    // Start heartbeat to prove session is active
+    startHeartbeat();
+    startWatchdog();
   } catch (err) {
     console.warn('[agent-status] init failed:', err);
   }
@@ -71,9 +59,7 @@ export async function initAgentStatus() {
  */
 export async function resumeAgentStatus() {
   try {
-    const { data: status } = await supabase.rpc('support_get_agent_status');
-    currentStatus = status || 'OFFLINE';
-    if (currentStatus === 'AVAILABLE' || currentStatus === 'BUSY') {
+    if (currentStatus === 'AVAILABLE') {
       startHeartbeat();
       startWatchdog();
     }
@@ -93,54 +79,30 @@ export function stopAgentStatus() {
 }
 
 /**
- * Return the last-known agent status (AVAILABLE / BUSY / OFFLINE / null).
+ * Return the last-known agent status (AVAILABLE / OFFLINE / null).
  */
 export function getAgentStatus() {
   return currentStatus;
 }
 
 /**
- * Render a compact status dropdown into the given container element.
- * The container should be an empty <div> already placed in the admin header.
+ * Render a read-only status indicator into the given container element.
+ * Reflects the actual backend/session state — not a permanent label.
+ *
+ * ● Available  — heartbeat is healthy, agent is AVAILABLE
+ * ● Connecting — heartbeat may be stale or status is still initializing
  */
-export function renderAgentStatusDropdown(container) {
+export function renderAgentStatusIndicator(container) {
   if (!container) return;
 
-  const status = currentStatus || 'OFFLINE';
-  const dotColors = {
-    AVAILABLE: 'bg-green-500',
-    BUSY: 'bg-yellow-500',
-    OFFLINE: 'bg-text-secondary/40 dark:bg-text-secondary-dark/40',
-  };
+  const isHealthy = currentStatus === 'AVAILABLE' && heartbeatTimer !== null;
+  const dotColor = isHealthy ? 'bg-green-500' : 'bg-yellow-500';
+  const label = isHealthy ? 'Available' : 'Connecting';
 
   container.innerHTML = `
-    <span class="flex h-2 w-2 rounded-full ${dotColors[status] || dotColors.OFFLINE}"></span>
-    <select id="global-agent-status-select" class="bg-transparent py-1 px-1 text-[11px] font-medium text-text-secondary dark:text-text-secondary-dark border-none outline-none cursor-pointer">
-      <option value="AVAILABLE" ${status === 'AVAILABLE' ? 'selected' : ''}>Available</option>
-      <option value="BUSY" ${status === 'BUSY' ? 'selected' : ''}>Busy</option>
-      <option value="OFFLINE" ${status === 'OFFLINE' ? 'selected' : ''}>Offline</option>
-    </select>
+    <span class="flex h-2 w-2 rounded-full ${dotColor}"></span>
+    <span class="text-[11px] font-medium text-text-secondary dark:text-text-secondary-dark">${label}</span>
   `;
-
-  container.querySelector('#global-agent-status-select').addEventListener('change', async (e) => {
-    const newStatus = e.target.value;
-    const { error } = await supabase.rpc('support_set_agent_status', { p_status: newStatus });
-    if (error) {
-      console.warn('[agent-status] set status failed:', error.message);
-      return;
-    }
-    currentStatus = newStatus;
-    // Re-render the dropdown with updated colours
-    renderAgentStatusDropdown(container);
-    // Heartbeat: start for AVAILABLE/BUSY, stop for OFFLINE
-    if (newStatus === 'AVAILABLE' || newStatus === 'BUSY') {
-      startHeartbeat();
-      startWatchdog();
-    } else {
-      stopHeartbeat();
-      stopWatchdog();
-    }
-  });
 }
 
 // -----------------------------------------------------------------------------
@@ -190,7 +152,7 @@ function stopWatchdog() {
  * quickly refresh the DB timestamp.
  */
 function watchdogCheck() {
-  if (heartbeatTimer === null && (currentStatus === 'AVAILABLE' || currentStatus === 'BUSY')) {
+  if (heartbeatTimer === null && currentStatus === 'AVAILABLE') {
     console.warn('[agent-status] Watchdog: heartbeat was dead — restarting');
     fireHeartbeat();
     heartbeatTimer = setInterval(fireHeartbeat, HEARTBEAT_MS);

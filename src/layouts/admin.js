@@ -3,7 +3,7 @@ import { toggleTheme, getTheme } from '@/core/theme';
 import { getUser, getDisplayUsername } from '@/core/auth';
 import { createBottomNav } from '@/components/navigation';
 import { startAdminBadges, markUsersSeen } from '@/admin/notifications';
-import { initAgentStatus, stopAgentStatus, renderAgentStatusDropdown } from '@/admin/agent-status';
+import { initAgentStatus, stopAgentStatus, renderAgentStatusIndicator } from '@/admin/agent-status';
 
 const adminNavItems = [
   { route: 'admin', label: 'Dashboard' },
@@ -104,8 +104,8 @@ export function createAdminLayout() {
   // Start notification badge refresh loop (single guarded interval)
   startAdminBadges();
 
-  // Render agent status dropdown into the header slot
-  renderAgentStatusDropdown(header.querySelector('#agent-status-slot'));
+  // Render agent status indicator into the header slot
+  renderAgentStatusIndicator(header.querySelector('#agent-status-slot'));
 }
 
 export function updateAdminNav() {

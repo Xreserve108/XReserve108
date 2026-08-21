@@ -14,11 +14,12 @@ export function onLayoutChange(handler) {
 }
 
 export function navigate(routeName) {
-  if (!routes[routeName]) {
-    console.warn(`Route "${routeName}" not registered`);
+  const baseName = routeName.split('?')[0];
+  if (!routes[baseName]) {
+    console.warn(`Route "${baseName}" not registered`);
     return;
   }
-  const route = routes[routeName];
+  const route = routes[baseName];
   if (route.protected && !isAuthenticated()) {
     currentRoute = 'signin';
     window.location.hash = 'signin';
@@ -48,7 +49,7 @@ export function navigate(routeName) {
     return;
   }
   // Redirect admin away from home
-  if (routeName === 'home') {
+  if (baseName === 'home') {
     isAdmin().then((isAdm) => {
       if (isAdm) {
         currentRoute = 'admin';
@@ -71,7 +72,8 @@ export function getCurrentRoute() {
 }
 
 function render() {
-  const route = routes[currentRoute];
+  const baseName = (currentRoute || '').split('?')[0];
+  const route = routes[baseName];
 
   // Switch layout before rendering
   if (layoutHandler && route) {
@@ -169,7 +171,9 @@ async function redirectAdminFromHome(initial) {
 
 export function initRouter() {
   window.addEventListener('hashchange', () => {
-    let hash = resolveHash(window.location.hash.slice(1));
+    const rawHash = window.location.hash.slice(1);
+    const baseName = rawHash.split('?')[0];
+    let hash = resolveHash(baseName);
 
     if (hash !== currentRoute) {
       const route = routes[hash];
@@ -188,7 +192,7 @@ export function initRouter() {
               render();
               return;
             }
-            currentRoute = hash;
+            currentRoute = rawHash;
           } else {
             currentRoute = 'home';
             window.location.hash = 'home';
@@ -203,13 +207,13 @@ export function initRouter() {
             currentRoute = 'admin';
             window.location.hash = 'admin';
           } else {
-            currentRoute = hash;
+            currentRoute = rawHash;
           }
           render();
         });
         return;
       } else if (route) {
-        currentRoute = hash;
+        currentRoute = rawHash;
       } else {
         currentRoute = 'home';
       }
@@ -218,7 +222,9 @@ export function initRouter() {
   });
 
   (async () => {
-    let initial = resolveHash(window.location.hash.slice(1));
+    const rawInitial = window.location.hash.slice(1);
+    const baseInitial = rawInitial.split('?')[0];
+    let initial = resolveHash(baseInitial);
     initial = await redirectAdminFromHome(initial);
 
     if (routes[initial]) {
@@ -233,13 +239,13 @@ export function initRouter() {
           if (!status.enabled) {
             currentRoute = 'security';
           } else {
-            currentRoute = initial;
+            currentRoute = rawInitial;
           }
         } else {
           currentRoute = 'home';
         }
       } else {
-        currentRoute = initial;
+        currentRoute = rawInitial;
       }
     } else {
       currentRoute = 'home';
