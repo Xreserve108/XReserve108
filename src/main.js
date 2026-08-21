@@ -6,7 +6,7 @@ import { initLenis } from '@/core/smooth-scroll';
 import { initAuth, onAuthStateChange, isAdmin, signOut, openAuthGate, is2FAVerified } from '@/core/auth';
 import { initApp, setAdminState, rebuildUserLayout } from '@/app';
 import { navigate, refreshCurrentPage, getCurrentRoute, initRouter } from '@/core/router';
-import { getWalletBalance } from '@/data/wallet-data';
+import { getWalletBalance, startWalletHeartbeat, stopWalletHeartbeat } from '@/data/wallet-data';
 import { supabase } from '@/lib/supabase';
 
 function formatAmount(num) {
@@ -91,6 +91,12 @@ function setupAuthListener() {
     if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') {
       const isAdm = await isAdmin();
       setAdminState(isAdm);
+      // Start the global wallet heartbeat for authenticated users.
+      // Safe to call on both events — startWalletHeartbeat() guards against
+      // duplicate intervals. The heartbeat runs for all authenticated users
+      // including admins (admin layout has no wallet pill, but the calls
+      // are harmless no-ops in that context).
+      startWalletHeartbeat();
       // Always rebuild layout so the wallet control appears for non-admin users too
       rebuildUserLayout();
       if (isAdm) {
@@ -126,6 +132,8 @@ function setupAuthListener() {
         }
       }
     } else if (event === 'SIGNED_OUT') {
+      // Stop the global wallet heartbeat — no longer authenticated
+      stopWalletHeartbeat();
       setAdminState(false);
       if (route && route !== 'home' && route !== 'signin' && route !== 'profile') {
         navigate('home');

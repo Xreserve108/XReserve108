@@ -2,6 +2,7 @@ import { supabase } from '@/lib/supabase';
 import { StatusBadge } from '@/components/StatusBadge';
 import { ConfirmDialog } from '@/components/admin/ConfirmDialog';
 import { requireVerification } from '@/components/TotpDialog';
+import { refreshWalletBalance } from '@/data/wallet-data';
 
 // Short-lived credit continuations issued by admin_manually_verify_deposit
 // (server-side: bound to this admin + deposit, single-use, ~5 min expiry).
@@ -481,6 +482,7 @@ export function renderAdminDeposits() {
           return;
         }
         showFeedback(modal, 'Updated successfully', 'green');
+        refreshWalletBalance();
         setTimeout(() => loadDeposits(), 800);
       } catch {
         showFeedback(modal, 'Verification cancelled', 'amber');
@@ -572,6 +574,7 @@ export function renderAdminDeposits() {
         }
       }
       showFeedback(modal, `Successfully credited ${formatAmount(amount)} USDT`, 'green');
+      refreshWalletBalance();
       setTimeout(() => { overlay.remove(); loadDeposits(); }, 800);
     } catch {
       showFeedback(modal, 'Verification cancelled', 'amber');

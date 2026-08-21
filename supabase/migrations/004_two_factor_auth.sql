@@ -80,8 +80,11 @@ BEGIN
       WHEN 'U' THEN 20 WHEN 'V' THEN 21 WHEN 'W' THEN 22 WHEN 'X' THEN 23
       WHEN 'Y' THEN 24 WHEN 'Z' THEN 25 WHEN '2' THEN 26 WHEN '3' THEN 27
       WHEN '4' THEN 28 WHEN '5' THEN 29 WHEN '6' THEN 30 WHEN '7' THEN 31
-      ELSE RAISE EXCEPTION 'Invalid base32 character: %', v_ch
+      ELSE NULL
     END;
+    IF v_val IS NULL THEN
+      RAISE EXCEPTION 'Invalid base32 character: %', v_ch;
+    END IF;
     v_accum := (v_accum << 5) | v_val::BIT(64);
     v_bits  := v_bits + 5;
     IF v_bits >= 8 THEN

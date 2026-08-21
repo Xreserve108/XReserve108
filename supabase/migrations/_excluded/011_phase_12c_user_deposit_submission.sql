@@ -1,55 +1,16 @@
--- XReserve Phase 12C — Production-Applied Safe Parts of Migration 011
--- ============================================================================
--- This migration is the PRODUCTION-APPLIED equivalent of the original
--- Migration 011 file (011_phase_12c_user_deposit_submission.sql).
+-- XReserve Phase 12C — Secure User Deposit Submission & Verification Queue
+-- Extends the existing deposits table to support user-initiated deposit
+-- submissions with TXID tracking, blockchain URL, and destination address
+-- binding to the authoritative Active Deposit Method.
 --
--- PRODUCTION STATE:
---   009 = APPLIED
---   010 = APPLIED
---   011 = MISSING (this file replaces it for production)
---   012 = APPLIED (admin_credit_deposit hardened — PENDING_VERIFICATION NOT creditable)
---   013 = APPLIED (admin_update_deposit_status hardened — CREDITED not allowed via this RPC)
---   014 = NOT APPLIED
+-- KEY PRINCIPLES:
+-- - User-entered amount is DECLARATIVE only, never trusted for crediting
+-- - Destination address resolved server-side from active deposit method
+-- - TXID uniqueness enforced at database level (per network)
+-- - All submissions require user_transaction 2FA scope
+-- - Deposit created as PENDING_VERIFICATION — NO wallet crediting
+-- - Existing create_deposit() RPC replaced with secure submit_deposit()
 --
--- REASON FOR THIS FILE:
--- The original Migration 011 contains a `CREATE OR REPLACE FUNCTION
--- public.admin_credit_deposit(...)` statement (Section 9) that includes
--- 'PENDING_VERIFICATION' in the list of creditable statuses. This conflicts
--- with Migration 012, which has already been applied to production and which
--- has correctly removed PENDING_VERIFICATION from the creditable status list.
--- Executing Section 9 of the original 011 would silently REVERT Migration
--- 012's security fix and reintroduce the PENDING_VERIFICATION creditable-
--- status bug that 012 was specifically created to fix.
---
--- CONTENTS (copied verbatim from the original Migration 011):
---   Section 1:  Extend deposits table with 5 new columns
---   Section 2:  Extend status check constraint to include PENDING_VERIFICATION
---   Section 3:  Add chk_declared_amount_positive constraint
---   Section 4:  Add chk_blockchain_url_scheme constraint
---   Section 5:  Replace global TXID unique index with per-network index
---   Section 6:  Add idx_deposits_user_status_pending
---   Section 7:  Drop old create_deposit() and create submit_deposit()
---   Section 8:  Create get_user_pending_deposits()
---   Section 10: Revoke client EXECUTE access on new RPCs
---
--- EXPLICITLY EXCLUDED:
---   Section 9:  admin_credit_deposit() redefinition
---               (Migration 012's hardened version is the authoritative one
---                and MUST remain untouched)
---   admin_update_deposit_status() redefinition
---               (Migration 013's hardened version is the authoritative one
---                and MUST remain untouched)
---
--- SAFETY:
---   - No data modification (only additive schema changes)
---   - No wallet or ledger changes
---   - No existing deposit balances affected
---   - No existing admin_credit_deposit() or admin_update_deposit_status() modified
---   - No destructive operations
---   - All operations are idempotent (IF NOT EXISTS / IF EXISTS / OR REPLACE)
---
--- ============================================================================
-
 -- =============================================================================
 -- 1. EXTEND DEPOSITS TABLE
 --    Add columns needed for the Phase 12C submission workflow.
@@ -366,33 +327,108 @@ END;
 $$;
 
 -- =============================================================================
--- 10. SECURITY — REVOKE FROM anon/public, GRANT EXECUTE TO authenticated
+-- 9. UPDATE admin_credit_deposit() TO ACCEPT PENDING_VERIFICATION
+--    Phase 12C introduces PENDING_VERIFICATION status. The admin credit
+--    function (originally from migration 006) only accepted PENDING and
+--    UNDER_REVIEW. This update adds PENDING_VERIFICATION to the allowed
+--    statuses so admins can review and credit Phase 12C deposits.
+--    All other security controls remain identical:
+--    - is_admin_user() check
+--    - admin_financial 2FA scope via _require_admin_2fa()
+--    - SELECT FOR UPDATE on deposit row
+--    - Rejects already-credited, rejected, or invalid statuses
+--    - Admin-supplied amount (not user-declared amount) is used for credit
 -- =============================================================================
 
--- submit_deposit: revoke from anon/public, grant to authenticated
+CREATE OR REPLACE FUNCTION public.admin_credit_deposit(
+  p_deposit_id      UUID,
+  p_amount          NUMERIC,
+  p_verification_id UUID
+)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER SET search_path = public
+AS $$
+DECLARE
+  v_deposit          RECORD;
+  v_wallet_id        UUID;
+  v_balance_before   NUMERIC(18,8);
+BEGIN
+  IF NOT public.is_admin_user() THEN RAISE EXCEPTION 'not authorized'; END IF;
+  PERFORM public._require_admin_2fa(p_verification_id, 'admin_financial');
+
+  IF p_amount IS NULL OR p_amount <= 0 THEN
+    RAISE EXCEPTION 'admin_credit_deposit: amount must be greater than zero';
+  END IF;
+
+  SELECT * INTO v_deposit FROM public.deposits WHERE id = p_deposit_id FOR UPDATE;
+  IF v_deposit.id IS NULL THEN
+    RAISE EXCEPTION 'admin_credit_deposit: deposit not found';
+  END IF;
+  IF v_deposit.status = 'CREDITED' THEN
+    RAISE EXCEPTION 'admin_credit_deposit: deposit already credited';
+  END IF;
+  IF v_deposit.status NOT IN ('PENDING', 'PENDING_VERIFICATION', 'UNDER_REVIEW') THEN
+    RAISE EXCEPTION 'admin_credit_deposit: cannot credit deposit with status %', v_deposit.status;
+  END IF;
+
+  SELECT wb.wallet_id, wb.available_usdt
+    INTO v_wallet_id, v_balance_before
+    FROM public.wallets w
+    JOIN public.wallet_balances wb ON wb.wallet_id = w.id
+   WHERE w.user_id = v_deposit.user_id
+     FOR UPDATE OF wb;
+
+  IF v_wallet_id IS NULL THEN
+    RAISE EXCEPTION 'admin_credit_deposit: wallet not found';
+  END IF;
+
+  UPDATE public.wallet_balances
+     SET available_usdt = available_usdt + p_amount, updated_at = now()
+   WHERE wallet_id = v_wallet_id;
+
+  INSERT INTO public.ledger_entries
+    (wallet_id, entry_type, amount, balance_before, balance_after, reference_type, reference_id, metadata)
+  VALUES (v_wallet_id, 'CREDIT', p_amount, v_balance_before, v_balance_before + p_amount, 'deposit', p_deposit_id, '{"direction":"credit","context":"admin_deposit_credit"}'::jsonb);
+
+  UPDATE public.deposits
+     SET status = 'CREDITED', actual_amount = p_amount, updated_at = now()
+   WHERE id = p_deposit_id;
+
+  INSERT INTO public.audit_logs (actor_id, action, target_type, target_id, metadata)
+  VALUES (auth.uid(), 'DEPOSIT_CREDITED', 'deposit', p_deposit_id,
+    jsonb_build_object('amount', p_amount, 'previous_status', v_deposit.status, 'new_status', 'CREDITED', 'user_id', v_deposit.user_id, 'verification_id', p_verification_id));
+
+  RETURN TRUE;
+END;
+$$;
+
+-- =============================================================================
+-- 10. SECURITY — REVOKE CLIENT ACCESS
+-- =============================================================================
+
+-- New submit RPC: revoke from anon/public (authenticated only)
 REVOKE EXECUTE ON FUNCTION public.submit_deposit(TEXT, NUMERIC, TEXT, TEXT, UUID) FROM anon, public;
-GRANT  EXECUTE ON FUNCTION public.submit_deposit(TEXT, NUMERIC, TEXT, TEXT, UUID) TO   authenticated;
 
--- get_user_pending_deposits: revoke from anon/public, grant to authenticated
+-- Pending deposits RPC: revoke from anon/public
 REVOKE EXECUTE ON FUNCTION public.get_user_pending_deposits() FROM anon, public;
-GRANT  EXECUTE ON FUNCTION public.get_user_pending_deposits() TO   authenticated;
 
 -- =============================================================================
--- MIGRATION COMPLETE
+-- 11. MIGRATION COMPLETE
 -- =============================================================================
--- Phase 12C (Production-Applied Safe Parts) — see header for context.
+-- Phase 12C: Secure User Deposit Submission & Verification Queue
 -- - Extended deposits table with destination_address, blockchain_url,
 --   declared_amount, verified_amount, deposit_method_id columns
 -- - Added PENDING_VERIFICATION status
 -- - Dropped old idx_deposits_tx_hash_unique (global) in favor of
 --   idx_deposits_tx_hash_per_network (per-network uniqueness)
--- - submit_deposit() replaces create_deposit() with full validation
+-- - submit_deposit() replaces create_deposit() with full validation:
+--   auth, active method resolution (no hardcoded network whitelist),
+--   amount validation, TXID validation, URL validation, 2FA verification,
+--   atomic token consumption
+-- - Destination address resolved server-side from active deposit method
+-- - User-entered amount stored as declared_amount (never trusted for credit)
 -- - get_user_pending_deposits() for user's own pending view
+-- - admin_credit_deposit() updated to accept PENDING_VERIFICATION status
 -- - All client DML access revoked
---
--- EXPLICITLY EXCLUDED:
--- - admin_credit_deposit() redefinition (Migration 012's hardened
---   version remains authoritative)
--- - admin_update_deposit_status() modification (Migration 013's
---   hardened version remains authoritative)
 -- =============================================================================

@@ -2,6 +2,7 @@ import { supabase } from '@/lib/supabase';
 import { StatusBadge } from '@/components/StatusBadge';
 import { ConfirmDialog } from '@/components/admin/ConfirmDialog';
 import { requireVerification } from '@/components/TotpDialog';
+import { refreshWalletBalance } from '@/data/wallet-data';
 
 const filters = ['All', 'Payment Pending', 'Completed', 'Rejected', 'Cancelled', 'Manual Review'];
 const filterMap = { 'All': null, 'Payment Pending': 'PAYMENT_PENDING', 'Completed': 'COMPLETED', 'Rejected': 'REJECTED', 'Cancelled': 'CANCELLED', 'Manual Review': 'MANUAL_REVIEW' };
@@ -241,6 +242,7 @@ export function renderAdminSellOrders() {
         return;
       }
       showFeedback(modal, 'Order completed successfully', 'green');
+      refreshWalletBalance();
       setTimeout(() => { overlay.remove(); loadOrders(); }, 800);
     } catch {
       showFeedback(modal, 'Verification cancelled', 'amber');
@@ -257,6 +259,7 @@ export function renderAdminSellOrders() {
         return;
       }
       showFeedback(modal, `Order ${status.toLowerCase()}`, 'green');
+      refreshWalletBalance();
       setTimeout(() => { overlay.remove(); loadOrders(); }, 800);
     } catch {
       showFeedback(modal, 'Verification cancelled', 'amber');

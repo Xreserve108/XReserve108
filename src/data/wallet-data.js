@@ -19,6 +19,111 @@ export async function getWalletBalance() {
 }
 
 /**
+ * Centralized wallet display refresh.
+ * Fetches the authoritative balance from Supabase and updates every wallet
+ * display element on the page (header pill, wallet page, sell page).
+ *
+ * Call this AFTER any server-confirmed wallet-affecting operation:
+ *   - deposit credited / rejected
+ *   - sell order completed / rejected / cancelled
+ *   - sell order created (reserved USDT)
+ *
+ * Safe to call from any context — if no wallet elements exist (e.g. admin
+ * layout), the function simply does nothing.
+ */
+export async function refreshWalletBalance() {
+  const balance = await getWalletBalance();
+  if (!balance || !isFinite(balance.available)) return;
+
+  const formatted = formatBalance(balance.available);
+
+  // Header pill (user layout — present on every user page)
+  const headerEl = document.getElementById('wallet-balance-text');
+  if (headerEl) headerEl.textContent = formatted;
+
+  // Wallet page balance
+  const walletEl = document.getElementById('wallet-balance');
+  if (walletEl) {
+    walletEl.textContent = '';
+    walletEl.appendChild(document.createTextNode(formatted));
+    const unit = document.createElement('span');
+    unit.className = 'text-[18px] font-medium text-text-secondary dark:text-text-secondary-dark';
+    unit.textContent = 'USDT';
+    walletEl.appendChild(unit);
+  }
+
+  // Sell page balance
+  const sellEl = document.getElementById('sell-balance');
+  if (sellEl) {
+    sellEl.innerHTML = `${formatted} <span class="text-[13px] font-medium text-text-secondary dark:text-text-secondary-dark">USDT</span>`;
+  }
+}
+
+function formatBalance(num) {
+  const n = Number(num);
+  if (!isFinite(n) || n < 0) return '0.00';
+  return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 });
+}
+
+// ---------------------------------------------------------------------------
+// Global wallet heartbeat
+//
+// A single 15-second interval that keeps the wallet display synchronised
+// with the authoritative server balance regardless of which page the user
+// is on. Without this, wallet-affecting events (admin crediting a deposit,
+// rejecting a sell order, etc.) would only be reflected when the user
+// navigates to a page that happens to fetch the balance at render time.
+//
+// Why global:  the header pill (#wallet-balance-text) is present on every
+//              authenticated user page, but previously it was only populated
+//              once at layout creation. A page-scoped fetch cannot discover
+//              remote changes that happen while the user stays on a page.
+//
+// Why it pauses while hidden:  there is no reason to consume network and
+//              Supabase quota on a tab the user isn't looking at. When the
+//              tab becomes visible again an immediate sync fires so the
+//              displayed balance is never stale for more than a moment.
+// ---------------------------------------------------------------------------
+
+const WALLET_HEARTBEAT_MS = 15000;
+let walletTimer = null;
+
+/**
+ * Start the global wallet heartbeat.
+ * Safe to call multiple times — only one interval is ever created.
+ */
+export function startWalletHeartbeat() {
+  if (walletTimer !== null) return;
+
+  // Immediate sync so the display is correct from the start
+  refreshWalletBalance();
+
+  walletTimer = setInterval(() => {
+    if (!document.hidden) {
+      refreshWalletBalance();
+    }
+  }, WALLET_HEARTBEAT_MS);
+
+  // When the tab becomes visible again, sync immediately rather than
+  // waiting for the next 15-second tick.
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && walletTimer !== null) {
+      refreshWalletBalance();
+    }
+  });
+}
+
+/**
+ * Stop the global wallet heartbeat and release the interval.
+ */
+export function stopWalletHeartbeat() {
+  if (walletTimer !== null) {
+    clearInterval(walletTimer);
+    walletTimer = null;
+  }
+}
+
+/**
  * Fetch the authenticated user's transaction history from the REAL order
  * records: deposits + sell_orders (both RLS-scoped to auth.uid()).
  * Shows the current DB status of each record, newest first by created_at.

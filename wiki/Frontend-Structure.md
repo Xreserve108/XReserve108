@@ -262,6 +262,7 @@ registerRoute('routeName', {
   - Always visible on mobile (compact sizing: 12px balance text, 20px icon)
   - Hidden for unauthenticated users (profile links to #signin instead)
 - **Desktop sidebar** — 240px fixed sidebar with full navigation + theme toggle
+- **Floating surfaces** — Bottom nav and wallet balance control use semi-opaque surfaces (90% opacity) + `backdrop-blur-xl`, remaining legible over the ambient background
 - Admin nav items: Dashboard, Deposits, Orders, Users, Settings
 
 ---
@@ -287,22 +288,36 @@ registerRoute('routeName', {
   - `background` (light: `#F5F5F7`, dark: `#000000`)
   - `text-primary` / `text-secondary` with dark variants
   - `action` (light: `#000000`, dark: `#FFFFFF`)
-  - `border` (semi-transparent rgba)
+  - `border` (semi-transparent rgba) — four tiers: `light` (6% black), `light-strong` (14% black), `dark` (8% white), `dark-strong` (22% white)
 - **Shadows**: `card`, `elevated` with dark variants
 - **Animations**: `fade-up`, `fade-in`, `scale-in`
 
 ### Component Classes (`src/styles/app.css`)
-- `.btn-primary` / `.btn-secondary` — Button variants with press animations
-- `.card` / `.card-interactive` — Surface containers with hover shadows
-- `.input-field` — Form inputs with focus states, error/success variants
-- `.page-title` / `.display` / `.text-muted` / `.section-heading` — Typography
+- `.btn-primary` / `.btn-secondary` — Button variants with press animations. `.btn-secondary` uses a **solid opaque surface + visible border in both themes** (border `light-strong`/`dark-strong`) so secondary actions never read as ghost/transparent
+- `.btn-danger` / `.btn-success` — Destructive and success button variants
+- `.card` / `.card-interactive` — Opaque surface containers with hover shadows; dialogs (TotpDialog, ConfirmDialog) build on `.card` so they fully occlude the ambient background
+- `.input-field` — Form inputs with **solid opaque backgrounds** (`surface-light` / `surface-dark`) so the ambient background never bleeds through; focus states, error/success variants
+- `.tab-active` / `.tab-inactive` — Filter pills; `.tab-inactive` uses solid chip backgrounds (`#ECECEF` light, `#161616` dark) with hover states
+- `.page-title` / `.display` / `.text-muted` / `.section-heading` / `.label` — Typography
 - `.divider` — 1px separator line
-- `.tab-active` — Active filter/tab pill
+- `.badge` / `.badge-neutral` — Small status/count badges
+- `.nav-badge` — Red unread-count badge for navigation items (absolutely positioned on bottom-nav icons)
 - `.sticky-action-bar` — Fixed bottom bar (sell page CTA)
 - `.auth-spinner` — Loading spinner
 - `.page-enter` / `.step-enter` — Page and step transition animations
 - `.stagger > *` — Staggered children animation (50ms delay increments)
 - `.scrollbar-hide` — Hide scrollbar utility
+
+### Ambient Background (`body::before` / `body::after`)
+Exchange-style ambient background rendered entirely in CSS — zero JS, zero DOM elements, both layers `position: fixed; z-index: -1; pointer-events: none` with a bottom-fade mask:
+- **`body::before`** — Layered CSS gradients: square grid at **44px** (fine) and **220px** (structural) cell sizes, radial intersection dots, and two soft radial glow washes. Dark variant swaps to white/emerald tints
+- **`body::after`** — Single URL-encoded inline SVG (1440×900, `background-size: cover`) animated with SMIL (auto-pauses in background tabs):
+  - 15 strictly **orthogonal** (horizontal/vertical only) connection paths snapped to the 44px grid — no diagonals
+  - 20 static node dots at grid intersections + 3 "breathing" emerald active nodes
+  - **20 moving data pulses** travelling along grid-aligned routes (15–36s durations, staggered negative `begin` offsets, fade in/out at route ends)
+  - 3 organic market-graph polylines with travelling `stroke-dashoffset` highlight segments
+- **Theme adaptation** — Both themes share identical geometry and timing; `.dark body::after` swaps the palette (white/gray geometry) and upgrades moving-node glow to a 3-layer stack (diffusion r=7 + halo r=3.5 + crisp `#34d399` core r=1.5). Light mode stays soft/restrained
+- **Layering/isolation** — Ambient layers sit below all content; bleed-through is prevented by opaque surfaces on shared classes (`.card`, `.input-field`, `.btn-secondary`, `.tab-inactive`), not by hiding the animation
 
 ### Responsive Breakpoints
 - Mobile-first design

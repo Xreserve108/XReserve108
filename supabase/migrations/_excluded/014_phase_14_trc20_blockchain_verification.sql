@@ -1,40 +1,25 @@
--- XReserve Phase 14b — TRC20 USDT Blockchain Verification (Corrected)
--- CORRECTIVE / ADDITIVE MIGRATION
+-- XReserve Phase 14 — TRC20 USDT Blockchain Verification + Manual Admin Verification
+-- SECURITY-FIRST IMPLEMENTATION
 --
--- This migration is the safe, corrected version of Migration 014.
--- It implements the full Phase 14 blockchain verification pipeline
--- WITHOUT modifying the existing admin_credit_deposit() (Migration 012)
--- or admin_update_deposit_status() (Migration 013).
+-- ARCHITECTURE (SINGLE admin_financial 2FA CHALLENGE — AT CREDIT TIME ONLY):
+-- 1. USER SUBMITS DEPOSIT (with user_transaction 2FA)  → PENDING_VERIFICATION
+-- 2. SERVER-SIDE BLOCKCHAIN VERIFICATION              → sets verified_amount
+-- 3. ADMIN MANUAL VERIFICATION (no 2FA — just checklist confirmation) → marks manually_verified_at
+-- 4. ADMIN CLICKS "Credit Deposit"
+-- 5. ADMIN_FINANCIAL 2FA CHALLENGE (single)
+-- 6. admin_credit_deposit() executes the wallet credit using the
+--    server-derived verified_amount (NOT p_amount)
 --
--- KEY DIFFERENCES FROM MIGRATION 014:
--- - Section 7 of Migration 014 (which overwrites admin_credit_deposit) is EXCLUDED.
--- - A NEW dedicated function admin_credit_verified_deposit() is introduced instead.
--- - A database trigger enforces the Phase 14 state-machine invariant:
---   deposits created by submit_deposit() (identified by deposit_method_id IS NOT NULL)
---   can NEVER transition to PENDING or UNDER_REVIEW, closing both the direct bypass
---   and the REJECTED → PENDING bypass to the legacy admin_credit_deposit() path.
--- - All new RPCs have explicit GRANT EXECUTE TO authenticated.
+-- KEY PRINCIPLES:
+-- - The blockchain is the source of truth for the actual received amount
+-- - The user-declared amount is NEVER used for crediting
+-- - The admin CANNOT override the verified blockchain amount
+-- - The single 2FA challenge is at the actual financial action (credit)
+-- - Manual verification is a logged confirmation with a mandatory checklist
+-- - TRC20 only — BEP20 must remain inactive
 --
--- ARCHITECTURE:
--- 1. USER SUBMITS DEPOSIT (submit_deposit, user_transaction 2FA) → PENDING_VERIFICATION
--- 2. BLOCKCHAIN VERIFICATION (Edge Function, TronGrid API)        → sets verified_amount
--- 3. ADMIN MANUAL VERIFICATION (8-item checklist, no 2FA)        → sets manually_verified_at
--- 4. ADMIN CLICKS "Credit" → admin_financial 2FA challenge
--- 5. admin_credit_verified_deposit() credits wallet using verified_amount (DB-derived)
---
--- SECURITY INVARIANTS:
--- - The user-declared amount is NEVER used for crediting.
--- - verified_amount (blockchain-derived, stored in DB) is the sole credit authority.
--- - Phase 14 deposits (deposit_method_id IS NOT NULL) can only be credited through
---   admin_credit_verified_deposit(). The legacy admin_credit_deposit() is unreachable.
--- - A database trigger prevents Phase 14 deposits from entering PENDING/UNDER_REVIEW.
--- - Migration 012 (admin_credit_deposit) is NOT modified.
--- - Migration 013 (admin_update_deposit_status) is NOT modified.
---
--- PRODUCTION STATE:
--- - Migrations 001-010, 011b, 012, 013 are APPLIED.
--- - Migration 014 is NOT APPLIED.
--- - This migration (014b) is the corrected replacement for 014.
+-- DO NOT execute this migration. Manual review required.
+-- DO NOT modify migrations 001-013.
 
 -- =============================================================================
 -- 1. EXTEND DEPOSITS TABLE — Verification Stage Fields
@@ -103,7 +88,7 @@ ALTER TABLE public.deposits
   ADD CONSTRAINT chk_blockchain_verified_at_past
   CHECK (blockchain_verified_at IS NULL OR blockchain_verified_at <= now() + interval '5 minutes');
 
--- verified_amount already exists from migration 011b; ensure positive when set
+-- verified_amount already exists from migration 011; ensure positive when set
 ALTER TABLE public.deposits
   DROP CONSTRAINT IF EXISTS chk_verified_amount_positive;
 ALTER TABLE public.deposits
@@ -255,7 +240,6 @@ END;
 $$;
 
 REVOKE EXECUTE ON FUNCTION public.request_blockchain_verification(UUID) FROM anon, public;
-GRANT  EXECUTE ON FUNCTION public.request_blockchain_verification(UUID) TO   authenticated;
 
 -- =============================================================================
 -- 5. RPC: get_deposit_verification_details
@@ -340,8 +324,7 @@ BEGIN
 END;
 $$;
 
-REVOKE EXECUTE ON FUNCTION public.get_deposit_verification_details(UUID) FROM anon, public;
-GRANT  EXECUTE ON FUNCTION public.get_deposit_verification_details(UUID) TO   authenticated;
+REVOKE EXECUTE ON FUNCTION public.get_deposit_verification_details(UUID) FROM anon, public, authenticated;
 
 -- =============================================================================
 -- 6. RPC: admin_manually_verify_deposit
@@ -350,7 +333,7 @@ GRANT  EXECUTE ON FUNCTION public.get_deposit_verification_details(UUID) TO   au
 --    any wallet write and does NOT require admin_financial 2FA.
 --
 --    The single admin_financial 2FA challenge is reserved exclusively for
---    the actual wallet credit (admin_credit_verified_deposit).
+--    the actual wallet credit (admin_credit_deposit).
 --
 --    Validates:
 --    - Caller is admin (is_admin_user())
@@ -364,6 +347,9 @@ GRANT  EXECUTE ON FUNCTION public.get_deposit_verification_details(UUID) TO   au
 --
 --    The 8 mandatory checklist items are:
 --      txid, network, token, sender, recipient, amount, finality, wallet_info
+--    These correspond to the items the admin must independently confirm
+--    (TXID, TRC20 network, USDT token, sender, recipient, blockchain verified
+--    amount, transaction status/finality, relevant wallet/blockchain info).
 --
 --    Records: manually_verified_at, manually_verified_by, manual_verification_notes,
 --             manual_verification_checklist
@@ -372,8 +358,8 @@ GRANT  EXECUTE ON FUNCTION public.get_deposit_verification_details(UUID) TO   au
 
 CREATE OR REPLACE FUNCTION public.admin_manually_verify_deposit(
   p_deposit_id UUID,
-  p_checklist  JSONB,
-  p_notes      TEXT DEFAULT NULL
+  p_notes      TEXT DEFAULT NULL,
+  p_checklist  JSONB
 )
 RETURNS BOOLEAN
 LANGUAGE plpgsql
@@ -393,7 +379,7 @@ BEGIN
 
   -- IMPORTANT: This RPC does NOT require admin_financial 2FA.
   -- The 2FA challenge is reserved for the actual financial action
-  -- (admin_credit_verified_deposit). Manual verification is a logged
+  -- (admin_credit_deposit). Manual verification is a logged
   -- confirmation only and does not move money.
 
   IF p_deposit_id IS NULL THEN
@@ -433,12 +419,6 @@ BEGIN
 
   IF v_deposit.status <> 'PENDING_VERIFICATION' THEN
     RAISE EXCEPTION 'admin_manually_verify_deposit: deposit must be in PENDING_VERIFICATION status (current: %)', v_deposit.status;
-  END IF;
-
-  -- Phase 14 marker: deposit_method_id must be set.
-  -- This function only operates on Phase 14 deposits.
-  IF v_deposit.deposit_method_id IS NULL THEN
-    RAISE EXCEPTION 'admin_manually_verify_deposit: deposit has no deposit method (not a Phase 14 deposit)';
   END IF;
 
   -- CRITICAL: blockchain verification must have completed
@@ -487,118 +467,46 @@ BEGIN
 END;
 $$;
 
-REVOKE EXECUTE ON FUNCTION public.admin_manually_verify_deposit(UUID, JSONB, TEXT) FROM anon, public;
-GRANT  EXECUTE ON FUNCTION public.admin_manually_verify_deposit(UUID, JSONB, TEXT) TO   authenticated;
+REVOKE EXECUTE ON FUNCTION public.admin_manually_verify_deposit(UUID, TEXT, JSONB)
+  FROM anon, public, authenticated;
 
 -- =============================================================================
--- 7. TRIGGER: Phase 14 Status-Transition Guard
+-- 7. STRENGTHEN admin_credit_deposit
+--    The single admin_financial 2FA challenge happens immediately before the
+--    wallet credit. p_amount is still accepted in the signature for backward
+--    compatibility with existing UI, but the server is the source of truth:
+--    the credit amount is COMPUTED from deposits.verified_amount, never from
+--    p_amount. p_amount is validated as a cross-check and must equal the
+--    server-side verified_amount, otherwise the request is rejected.
 --
---    PURPOSE:
---    Prevents Phase 14 deposits from ever reaching PENDING or UNDER_REVIEW
---    status, which would expose them to the legacy admin_credit_deposit()
---    path (Migration 012) that accepts a client-supplied amount.
+--    New validations:
+--    - Blockchain verification must have completed (blockchain_verified_at IS NOT NULL)
+--    - Manual admin verification must have completed (manually_verified_at IS NOT NULL)
+--    - verified_amount must be set
+--    - p_amount must equal verified_amount (admin cannot override)
+--    - Manual verification checklist must be present and complete
 --
---    PHASE 14 MARKER:
---    deposits.deposit_method_id IS NOT NULL
---    This column is set exclusively by submit_deposit() (Migration 011b)
---    and is never modified by any function after INSERT.
---    Legacy deposits (created by the old create_deposit()) have NULL.
+--    Defense in depth:
+--    - v_credit_amount := v_deposit.verified_amount (DB-derived, authoritative)
+--    - The wallet update and ledger entry use v_credit_amount, NOT p_amount
+--    - Even if the p_amount = verified_amount check were bypassed by a code
+--      change, the credit would still use the DB value
 --
---    BLOCKED TRANSITIONS (for Phase 14 deposits only):
---    - PENDING_VERIFICATION → PENDING
---    - PENDING_VERIFICATION → UNDER_REVIEW
---    - REJECTED → PENDING
---    - REJECTED → UNDER_REVIEW
---    - Any status → PENDING / UNDER_REVIEW (when deposit_method_id IS NOT NULL)
+--    All existing security preserved:
+--    - is_admin_user() check
+--    - admin_financial 2FA scope
+--    - SELECT FOR UPDATE on deposit row
+--    - SELECT FOR UPDATE on wallet balance
+--    - Atomic wallet update + ledger entry + status change
+--    - Rejects already-credited
 --
---    ALLOWED TRANSITIONS (for Phase 14 deposits):
---    - PENDING_VERIFICATION → REJECTED  (legitimate admin rejection)
---    - PENDING_VERIFICATION → CREDITED  (via admin_credit_verified_deposit)
---
---    LEGACY DEPOSITS (deposit_method_id IS NULL):
---    All transitions are unaffected. The trigger guard does not fire.
---
---    SAFETY:
---    - Uses DROP TRIGGER IF EXISTS + CREATE TRIGGER for rerunnability.
---    - Trigger function uses CREATE OR REPLACE for rerunnability.
---    - WHEN clause ensures the trigger body only evaluates on status changes.
---    - Does NOT interfere with non-status updates (e.g., blockchain
---      verification column changes by the Edge Function).
+--    This is implemented as CREATE OR REPLACE since we are overwriting
+--    the migration 012 version. The signature remains identical.
 -- =============================================================================
 
-CREATE OR REPLACE FUNCTION public.trg_fn_enforce_phase14_status_transitions()
-RETURNS TRIGGER
-LANGUAGE plpgsql
-AS $$
-BEGIN
-  -- Only evaluate when status is actually changing.
-  -- This prevents false blocks on non-status updates such as
-  -- verification column changes by the Edge Function or
-  -- updated_at changes by the trg_deposits_updated_at trigger.
-  IF OLD.status IS NOT DISTINCT FROM NEW.status THEN
-    RETURN NEW;
-  END IF;
-
-  -- Phase 14 deposit identification:
-  -- deposit_method_id is set exclusively by submit_deposit() (Migration 011b)
-  -- at creation time. It is never modified by any subsequent function.
-  -- Legacy deposits (created by the old create_deposit() before Migration 011b)
-  -- always have deposit_method_id = NULL.
-  IF NEW.deposit_method_id IS NOT NULL THEN
-    -- Block Phase 14 deposits from entering PENDING or UNDER_REVIEW.
-    -- These are the only two statuses accepted by the legacy
-    -- admin_credit_deposit() (Migration 012), which credits using
-    -- a client-supplied p_amount. By preventing Phase 14 deposits
-    -- from ever entering these statuses — regardless of the transition
-    -- chain (direct, via REJECTED, or any other path) — we guarantee
-    -- that admin_credit_deposit() can NEVER credit a Phase 14 deposit.
-    IF NEW.status IN ('PENDING', 'UNDER_REVIEW') THEN
-      RAISE EXCEPTION
-        'Phase 14 security: cannot transition a Phase 14 deposit '
-        '(deposit_method_id is set) to status %. '
-        'Phase 14 deposits can only be REJECTED or credited via '
-        'admin_credit_verified_deposit() using the blockchain-verified amount.',
-        NEW.status;
-    END IF;
-  END IF;
-
-  RETURN NEW;
-END;
-$$;
-
-DROP TRIGGER IF EXISTS trg_enforce_phase14_status_transitions ON public.deposits;
-
-CREATE TRIGGER trg_enforce_phase14_status_transitions
-  BEFORE UPDATE ON public.deposits
-  FOR EACH ROW
-  WHEN (OLD.status IS DISTINCT FROM NEW.status)
-  EXECUTE FUNCTION public.trg_fn_enforce_phase14_status_transitions();
-
--- =============================================================================
--- 8. RPC: admin_credit_verified_deposit
---    Phase 14 dedicated credit function for blockchain-verified deposits.
---
---    This function COEXISTS with admin_credit_deposit() (Migration 012).
---    It does NOT replace, modify, or overwrite admin_credit_deposit().
---
---    admin_credit_deposit()           → credits PENDING / UNDER_REVIEW deposits
---                                         (legacy path, uses client-supplied p_amount)
---    admin_credit_verified_deposit()  → credits PENDING_VERIFICATION deposits
---                                         after blockchain + manual verification
---                                         (uses DB-derived verified_amount only)
---
---    CRITICAL: No p_amount parameter. The credit amount is derived
---    EXCLUSIVELY from deposits.verified_amount. The client supplies
---    only the deposit ID and the 2FA verification token.
---
---    Authorization: is_admin_user() + admin_financial 2FA
---    Idempotency: rejects already-CREDITED deposits
---    Locking: SELECT FOR UPDATE on deposit + wallet balance
---    Atomic: wallet update + ledger entry + status change in single transaction
--- =============================================================================
-
-CREATE OR REPLACE FUNCTION public.admin_credit_verified_deposit(
+CREATE OR REPLACE FUNCTION public.admin_credit_deposit(
   p_deposit_id      UUID,
+  p_amount          NUMERIC,
   p_verification_id UUID
 )
 RETURNS BOOLEAN
@@ -609,93 +517,80 @@ DECLARE
   v_deposit          RECORD;
   v_wallet_id        UUID;
   v_balance_before   NUMERIC(18,8);
-  v_credit_amount    NUMERIC(18,6);
-  v_admin_id         UUID := auth.uid();
+  v_credit_amount    NUMERIC(18,6);  -- authoritative, derived from DB
 BEGIN
-  -- 1. Authentication
-  IF v_admin_id IS NULL THEN
-    RAISE EXCEPTION 'not authenticated';
-  END IF;
-
-  -- 2. Authorization: must be admin
+  -- Authorization
   IF NOT public.is_admin_user() THEN
     RAISE EXCEPTION 'not authorized';
   END IF;
-
-  -- 3. admin_financial 2FA verification
   PERFORM public._require_admin_2fa(p_verification_id, 'admin_financial');
 
-  -- 4. Parameter validation
-  IF p_deposit_id IS NULL THEN
-    RAISE EXCEPTION 'admin_credit_verified_deposit: deposit_id is required';
+  -- Amount sanity (will be cross-checked against verified_amount below)
+  IF p_amount IS NULL OR p_amount <= 0 THEN
+    RAISE EXCEPTION 'admin_credit_deposit: amount must be greater than zero';
   END IF;
 
-  -- 5. Lock the deposit row
+  -- Lock the deposit row
   SELECT * INTO v_deposit
   FROM public.deposits
   WHERE id = p_deposit_id
   FOR UPDATE;
 
-  -- 6. Deposit must exist
   IF v_deposit.id IS NULL THEN
-    RAISE EXCEPTION 'admin_credit_verified_deposit: deposit not found';
+    RAISE EXCEPTION 'admin_credit_deposit: deposit not found';
   END IF;
 
-  -- 7. Reject already-credited deposits (idempotency)
   IF v_deposit.status = 'CREDITED' THEN
-    RAISE EXCEPTION 'admin_credit_verified_deposit: deposit already credited';
+    RAISE EXCEPTION 'admin_credit_deposit: deposit already credited';
   END IF;
 
-  -- 8. Status must be exactly PENDING_VERIFICATION
-  IF v_deposit.status <> 'PENDING_VERIFICATION' THEN
-    RAISE EXCEPTION 'admin_credit_verified_deposit: deposit must be in PENDING_VERIFICATION status (current: %)', v_deposit.status;
+  -- Only PENDING_VERIFICATION deposits are creditable (the only state after
+  -- both blockchain verification AND manual verification are complete).
+  IF v_deposit.status NOT IN ('PENDING_VERIFICATION') THEN
+    RAISE EXCEPTION 'admin_credit_deposit: cannot credit deposit with status %. Both blockchain and manual verification are required.', v_deposit.status;
   END IF;
 
-  -- Phase 14 marker: deposit_method_id must be set.
-  -- This function only operates on Phase 14 deposits.
-  IF v_deposit.deposit_method_id IS NULL THEN
-    RAISE EXCEPTION 'admin_credit_verified_deposit: deposit has no deposit method (not a Phase 14 deposit)';
-  END IF;
-
-  -- 9. Blockchain verification must have completed
+  -- Phase 14: blockchain verification must have completed
   IF v_deposit.blockchain_verified_at IS NULL THEN
-    RAISE EXCEPTION 'admin_credit_verified_deposit: blockchain verification has not completed';
+    RAISE EXCEPTION 'admin_credit_deposit: blockchain verification has not completed';
   END IF;
 
-  -- 10. Manual admin verification must have completed
+  -- Phase 14: manual admin verification must have completed
   IF v_deposit.manually_verified_at IS NULL THEN
-    RAISE EXCEPTION 'admin_credit_verified_deposit: manual admin verification has not completed';
+    RAISE EXCEPTION 'admin_credit_deposit: manual admin verification has not completed';
   END IF;
 
-  -- 11. Manual verification checklist must be present
-  IF v_deposit.manual_verification_checklist IS NULL THEN
-    RAISE EXCEPTION 'admin_credit_verified_deposit: manual verification checklist is missing';
+  -- Phase 14: manual verification checklist must be present and complete
+  IF v_deposit.manual_verification_checklist IS NULL
+     OR NOT (
+       (v_deposit.manual_verification_checklist ? 'txid')        AND (v_deposit.manual_verification_checklist->>'txid')::boolean = true AND
+       (v_deposit.manual_verification_checklist ? 'network')     AND (v_deposit.manual_verification_checklist->>'network')::boolean = true AND
+       (v_deposit.manual_verification_checklist ? 'token')       AND (v_deposit.manual_verification_checklist->>'token')::boolean = true AND
+       (v_deposit.manual_verification_checklist ? 'sender')      AND (v_deposit.manual_verification_checklist->>'sender')::boolean = true AND
+       (v_deposit.manual_verification_checklist ? 'recipient')   AND (v_deposit.manual_verification_checklist->>'recipient')::boolean = true AND
+       (v_deposit.manual_verification_checklist ? 'amount')      AND (v_deposit.manual_verification_checklist->>'amount')::boolean = true AND
+       (v_deposit.manual_verification_checklist ? 'finality')    AND (v_deposit.manual_verification_checklist->>'finality')::boolean = true AND
+       (v_deposit.manual_verification_checklist ? 'wallet_info') AND (v_deposit.manual_verification_checklist->>'wallet_info')::boolean = true
+     ) THEN
+    RAISE EXCEPTION 'admin_credit_deposit: manual verification checklist is incomplete';
   END IF;
 
-  -- 12. Validate all 8 checklist items are present and TRUE
-  IF NOT (
-    (v_deposit.manual_verification_checklist ? 'txid')        AND (v_deposit.manual_verification_checklist->>'txid')::boolean = true AND
-    (v_deposit.manual_verification_checklist ? 'network')     AND (v_deposit.manual_verification_checklist->>'network')::boolean = true AND
-    (v_deposit.manual_verification_checklist ? 'token')       AND (v_deposit.manual_verification_checklist->>'token')::boolean = true AND
-    (v_deposit.manual_verification_checklist ? 'sender')      AND (v_deposit.manual_verification_checklist->>'sender')::boolean = true AND
-    (v_deposit.manual_verification_checklist ? 'recipient')   AND (v_deposit.manual_verification_checklist->>'recipient')::boolean = true AND
-    (v_deposit.manual_verification_checklist ? 'amount')      AND (v_deposit.manual_verification_checklist->>'amount')::boolean = true AND
-    (v_deposit.manual_verification_checklist ? 'finality')    AND (v_deposit.manual_verification_checklist->>'finality')::boolean = true AND
-    (v_deposit.manual_verification_checklist ? 'wallet_info') AND (v_deposit.manual_verification_checklist->>'wallet_info')::boolean = true
-  ) THEN
-    RAISE EXCEPTION 'admin_credit_verified_deposit: manual verification checklist is incomplete';
-  END IF;
-
-  -- 13. verified_amount must be set and positive
+  -- Phase 14: verified_amount must be set
   IF v_deposit.verified_amount IS NULL OR v_deposit.verified_amount <= 0 THEN
-    RAISE EXCEPTION 'admin_credit_verified_deposit: deposit has no valid verified amount';
+    RAISE EXCEPTION 'admin_credit_deposit: deposit has no verified amount';
   END IF;
 
-  -- 14. DERIVE the credit amount exclusively from the database.
-  --     No client-supplied amount is accepted. This is the authoritative value.
+  -- Phase 14: DERIVE the credit amount from the database (defense in depth).
+  -- Even if p_amount is tampered with at the application layer, the actual
+  -- wallet credit and ledger entry use this DB-derived value, NOT p_amount.
   v_credit_amount := v_deposit.verified_amount;
 
-  -- 15. Lock the user's wallet balance
+  -- Phase 14: p_amount MUST equal verified_amount (rejects any override attempt)
+  IF p_amount <> v_credit_amount THEN
+    RAISE EXCEPTION 'admin_credit_deposit: amount (%) does not match blockchain-verified amount (%). Admin cannot override the verified amount.', p_amount, v_credit_amount;
+  END IF;
+
+  -- Lock wallet balance
   SELECT wb.wallet_id, wb.available_usdt
     INTO v_wallet_id, v_balance_before
     FROM public.wallets w
@@ -703,72 +598,66 @@ BEGIN
    WHERE w.user_id = v_deposit.user_id
      FOR UPDATE OF wb;
 
-  -- 16. Wallet must exist
   IF v_wallet_id IS NULL THEN
-    RAISE EXCEPTION 'admin_credit_verified_deposit: wallet not found';
+    RAISE EXCEPTION 'admin_credit_deposit: wallet not found';
   END IF;
 
-  -- 17. Credit the wallet using verified_amount
+  -- Update wallet balance (uses v_credit_amount from DB, NOT p_amount)
   UPDATE public.wallet_balances
      SET available_usdt = available_usdt + v_credit_amount,
          updated_at     = now()
    WHERE wallet_id = v_wallet_id;
 
-  -- 18. Insert ledger entry
+  -- Insert ledger entry (uses v_credit_amount from DB, NOT p_amount)
   INSERT INTO public.ledger_entries
-    (wallet_id, entry_type, amount, balance_before, balance_after,
-     reference_type, reference_id, metadata)
-  VALUES (v_wallet_id, 'CREDIT', v_credit_amount, v_balance_before,
-          v_balance_before + v_credit_amount, 'deposit', p_deposit_id,
+    (wallet_id, entry_type, amount, balance_before, balance_after, reference_type, reference_id, metadata)
+  VALUES (v_wallet_id, 'CREDIT', v_credit_amount, v_balance_before, v_balance_before + v_credit_amount,
+          'deposit', p_deposit_id,
           jsonb_build_object(
             'direction', 'credit',
-            'context', 'admin_verified_deposit_credit',
+            'context', 'admin_deposit_credit',
             'verified_amount', v_deposit.verified_amount,
             'declared_amount', v_deposit.declared_amount,
             'blockchain_verified_at', v_deposit.blockchain_verified_at,
-            'manually_verified_at', v_deposit.manually_verified_at,
-            'verification_id', p_verification_id
+            'manually_verified_at', v_deposit.manually_verified_at
           ));
 
-  -- 19. Mark deposit as CREDITED
+  -- Update deposit: set CREDITED, actual_amount, metadata
+  -- actual_amount is set to v_credit_amount (the DB-derived value, not p_amount)
   UPDATE public.deposits
      SET status = 'CREDITED',
          actual_amount = v_credit_amount,
          metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object(
            'credited_at', now(),
-           'credited_by', v_admin_id,
+           'credited_by', auth.uid(),
            'verified_amount', v_deposit.verified_amount,
-           'declared_amount', v_deposit.declared_amount,
-           'credit_function', 'admin_credit_verified_deposit'
+           'declared_amount', v_deposit.declared_amount
          ),
          updated_at = now()
    WHERE id = p_deposit_id;
 
-  -- 20. Audit log
+  -- Audit log
   INSERT INTO public.audit_logs (actor_id, action, target_type, target_id, metadata)
-  VALUES (v_admin_id, 'DEPOSIT_CREDITED', 'deposit', p_deposit_id,
+  VALUES (auth.uid(), 'DEPOSIT_CREDITED', 'deposit', p_deposit_id,
     jsonb_build_object(
       'amount', v_credit_amount,
-      'verified_amount', v_deposit.verified_amount,
-      'declared_amount', v_deposit.declared_amount,
-      'previous_status', 'PENDING_VERIFICATION',
+      'p_amount_supplied', p_amount,
+      'previous_status', v_deposit.status,
       'new_status', 'CREDITED',
       'user_id', v_deposit.user_id,
-      'verification_id', p_verification_id,
-      'credit_function', 'admin_credit_verified_deposit',
-      'blockchain_verified_at', v_deposit.blockchain_verified_at,
-      'manually_verified_at', v_deposit.manually_verified_at
+      'verified_amount', v_deposit.verified_amount,
+      'declared_amount', v_deposit.declared_amount,
+      'verification_id', p_verification_id
     ));
 
   RETURN TRUE;
 END;
 $$;
 
-REVOKE EXECUTE ON FUNCTION public.admin_credit_verified_deposit(UUID, UUID) FROM anon, public;
-GRANT  EXECUTE ON FUNCTION public.admin_credit_verified_deposit(UUID, UUID) TO   authenticated;
+REVOKE EXECUTE ON FUNCTION public.admin_credit_deposit(UUID, NUMERIC, UUID) FROM anon, public;
 
 -- =============================================================================
--- 9. RPC: admin_list_blockchain_verified_deposits
+-- 8. RPC: admin_list_blockchain_verified_deposits
 --    Admin UI: list deposits that are blockchain-verified and awaiting manual review.
 -- =============================================================================
 
@@ -808,11 +697,10 @@ BEGIN
 END;
 $$;
 
-REVOKE EXECUTE ON FUNCTION public.admin_list_blockchain_verified_deposits() FROM anon, public;
-GRANT  EXECUTE ON FUNCTION public.admin_list_blockchain_verified_deposits() TO   authenticated;
+REVOKE EXECUTE ON FUNCTION public.admin_list_blockchain_verified_deposits() FROM anon, public, authenticated;
 
 -- =============================================================================
--- 10. RPC: admin_list_pending_blockchain_verification
+-- 9. RPC: admin_list_pending_blockchain_verification
 --    Admin UI: list deposits still awaiting blockchain verification.
 -- =============================================================================
 
@@ -849,90 +737,26 @@ BEGIN
 END;
 $$;
 
-REVOKE EXECUTE ON FUNCTION public.admin_list_pending_blockchain_verification() FROM anon, public;
-GRANT  EXECUTE ON FUNCTION public.admin_list_pending_blockchain_verification() TO   authenticated;
+REVOKE EXECUTE ON FUNCTION public.admin_list_pending_blockchain_verification() FROM anon, public, authenticated;
 
 -- =============================================================================
--- 11. RPC: admin_list_deposits_v2
---    Upgraded admin deposit listing that includes Phase 14 columns.
---    Does NOT modify the existing admin_list_deposits() (Migration 003).
---    The existing function remains intact for backward compatibility.
+-- 10. MIGRATION COMPLETE
+-- =============================================================================
+-- Phase 14: TRC20 USDT Blockchain Verification + Manual Admin Verification
 --
---    This function returns all columns from admin_list_deposits() plus:
---    declared_amount, verified_amount, destination_address,
---    blockchain_verified_at, manually_verified_at,
---    blockchain_verification_error, blockchain_verification_attempts
--- =============================================================================
-
-CREATE OR REPLACE FUNCTION public.admin_list_deposits_v2(
-  p_status TEXT DEFAULT NULL
-)
-RETURNS TABLE (
-  id                              UUID,
-  user_id                         UUID,
-  user_email                      TEXT,
-  network                         TEXT,
-  token                           TEXT,
-  expected_amount                 NUMERIC,
-  actual_amount                   NUMERIC,
-  tx_hash                         TEXT,
-  status                          TEXT,
-  metadata                        JSONB,
-  created_at                      TIMESTAMPTZ,
-  updated_at                      TIMESTAMPTZ,
-  declared_amount                 NUMERIC,
-  verified_amount                 NUMERIC,
-  destination_address             TEXT,
-  blockchain_verified_at          TIMESTAMPTZ,
-  manually_verified_at            TIMESTAMPTZ,
-  blockchain_verification_error   TEXT,
-  blockchain_verification_attempts INTEGER
-)
-LANGUAGE plpgsql
-SECURITY DEFINER SET search_path = public
-AS $$
-BEGIN
-  IF NOT public.is_admin_user() THEN
-    RAISE EXCEPTION 'not authorized';
-  END IF;
-
-  RETURN QUERY
-  SELECT
-    d.id, d.user_id, p.email, d.network, d.token,
-    d.expected_amount, d.actual_amount, d.tx_hash,
-    d.status, d.metadata, d.created_at, d.updated_at,
-    d.declared_amount, d.verified_amount, d.destination_address,
-    d.blockchain_verified_at, d.manually_verified_at,
-    d.blockchain_verification_error, d.blockchain_verification_attempts
-  FROM public.deposits d
-  JOIN public.profiles p ON p.id = d.user_id
-  WHERE COALESCE(p_status, d.status) = d.status
-  ORDER BY d.created_at DESC;
-END;
-$$;
-
-REVOKE EXECUTE ON FUNCTION public.admin_list_deposits_v2(TEXT) FROM anon, public;
-GRANT  EXECUTE ON FUNCTION public.admin_list_deposits_v2(TEXT) TO   authenticated;
-
--- =============================================================================
--- 12. MIGRATION COMPLETE
--- =============================================================================
--- Phase 14b: TRC20 USDT Blockchain Verification + Manual Admin Verification
--- (Corrected — does NOT modify admin_credit_deposit or admin_update_deposit_status)
---
--- ARCHITECTURE:
+-- CORRECTED ARCHITECTURE (single 2FA challenge at credit time only):
 --
 --   USER
 --     ↓
 --   USER 2FA (user_transaction scope, for submit_deposit)
 --     ↓
---   PENDING_VERIFICATION (deposit_method_id set — Phase 14 marker)
+--   PENDING_VERIFICATION
 --     ↓
---   BLOCKCHAIN VERIFICATION (server-side Edge Function, TronGrid, idempotent)
+--   BLOCKCHAIN VERIFICATION (server-side, TronGrid, idempotent)
 --     ↓
 --   BLOCKCHAIN VERIFIED  (verified_amount set, blockchain_verified_at set)
 --     ↓
---   ADMIN MANUAL VERIFICATION (no 2FA, 8-item checklist confirmation)
+--   ADMIN MANUAL VERIFICATION (no 2FA, just 8-item checklist confirmation)
 --     ↓
 --   MANUALLY VERIFIED    (manually_verified_at set, checklist stored)
 --     ↓
@@ -940,52 +764,47 @@ GRANT  EXECUTE ON FUNCTION public.admin_list_deposits_v2(TEXT) TO   authenticate
 --     ↓
 --   ADMIN_FINANCIAL 2FA  (the SINGLE financial 2FA challenge)
 --     ↓
---   admin_credit_verified_deposit()  (uses DB-derived verified_amount ONLY)
+--   admin_credit_deposit()  (uses DB-derived verified_amount, NOT p_amount)
 --     ↓
 --   wallet balance + ledger + deposit status = CREDITED
 --
--- STATE-MACHINE SECURITY:
---   A database trigger (trg_enforce_phase14_status_transitions) prevents
---   Phase 14 deposits (deposit_method_id IS NOT NULL) from ever entering
---   PENDING or UNDER_REVIEW status. This closes all bypass paths to the
---   legacy admin_credit_deposit() function:
---     - PENDING_VERIFICATION → PENDING         BLOCKED
---     - PENDING_VERIFICATION → UNDER_REVIEW    BLOCKED
---     - REJECTED → PENDING (for Phase 14)      BLOCKED
---     - REJECTED → UNDER_REVIEW (for Phase 14) BLOCKED
---   Legacy deposits (deposit_method_id IS NULL) are unaffected.
+-- Added columns to deposits:
+--   - blockchain_verified_at (timestamp)
+--   - blockchain_verification_data (JSONB)
+--   - blockchain_provider (text)
+--   - blockchain_verification_error (text)
+--   - blockchain_verification_attempts (int)
+--   - blockchain_verification_last_attempt_at (timestamp)
+--   - manually_verified_at (timestamp)
+--   - manually_verified_by (uuid)
+--   - manual_verification_notes (text)
+--   - manual_verification_checklist (JSONB)  [NEW]
 --
--- ADDED COLUMNS (10):
---   blockchain_verified_at, blockchain_verification_data, blockchain_provider,
---   blockchain_verification_error, blockchain_verification_attempts,
---   blockchain_verification_last_attempt_at, manually_verified_at,
---   manually_verified_by, manual_verification_notes, manual_verification_checklist
+-- Added RPCs:
+--   - request_blockchain_verification(deposit_id)                  [user-callable]
+--   - get_deposit_verification_details(deposit_id)                 [admin only]
+--   - admin_manually_verify_deposit(deposit_id, notes, checklist)  [admin only, NO 2FA]
+--   - admin_list_blockchain_verified_deposits()                    [admin only]
+--   - admin_list_pending_blockchain_verification()                 [admin only]
 --
--- ADDED CONSTRAINTS (5):
---   chk_blockchain_verified_at_past, chk_verified_amount_positive,
---   chk_blockchain_attempts_nonneg, chk_manual_verification_consistency,
---   chk_manual_checklist_structure
+-- Strengthened:
+--   - admin_credit_deposit() now REQUIRES (single admin_financial 2FA):
+--     * blockchain_verified_at IS NOT NULL
+--     * manually_verified_at IS NOT NULL
+--     * manual_verification_checklist complete (8 items all TRUE)
+--     * p_amount = verified_amount (rejected otherwise)
+--     * DEFENSE IN DEPTH: actual credit uses v_credit_amount := v_deposit.verified_amount
+--       (not p_amount), so the wallet and ledger always reflect the DB value
+--     * status must be PENDING_VERIFICATION
 --
--- ADDED INDEXES (2):
---   idx_deposits_pending_blockchain_verification,
---   idx_deposits_pending_manual_verification
---
--- ADDED TRIGGER (1):
---   trg_enforce_phase14_status_transitions (BEFORE UPDATE on deposits)
---
--- ADDED RPCs (7):
---   request_blockchain_verification(deposit_id)                  [user-callable]
---   get_deposit_verification_details(deposit_id)                 [admin only]
---   admin_manually_verify_deposit(deposit_id, notes, checklist)  [admin only, NO 2FA]
---   admin_credit_verified_deposit(deposit_id, verification_id)   [admin only, admin_financial 2FA]
---   admin_list_blockchain_verified_deposits()                    [admin only]
---   admin_list_pending_blockchain_verification()                 [admin only]
---   admin_list_deposits_v2(status)                               [admin only]
---
--- NOT MODIFIED:
---   admin_credit_deposit()          — Migration 012 version preserved
---   admin_update_deposit_status()   — Migration 013 version preserved
---   admin_list_deposits()           — Migration 003 version preserved
+-- Security:
+--   - All admin RPCs require is_admin_user()
+--   - Only admin_credit_deposit() requires admin_financial 2FA
+--   - admin_manually_verify_deposit() does NOT require 2FA
+--   - Manual verification requires an 8-item checklist all TRUE
+--   - User cannot modify verification state, verified_amount, or actual_amount
+--     (RLS unchanged from migration 001: SELECT only for deposit owner)
+--   - All client DML access revoked via REVOKE EXECUTE
 --
 -- BEP20: not activated. Only TRC20 deposit methods are active.
 -- =============================================================================
