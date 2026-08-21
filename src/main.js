@@ -8,7 +8,7 @@ import { initApp, setAdminState, rebuildUserLayout } from '@/app';
 import { navigate, refreshCurrentPage, getCurrentRoute, initRouter } from '@/core/router';
 import { getWalletBalance, startWalletHeartbeat, stopWalletHeartbeat } from '@/data/wallet-data';
 import { startChatPolling, stopChatPolling } from '@/lib/chat';
-import { initAgentStatus, stopAgentStatus } from '@/admin/agent-status';
+import { initAgentStatus, stopAgentStatus, resumeAgentStatus } from '@/admin/agent-status';
 import { supabase } from '@/lib/supabase';
 
 // Track last known admin status for logout cleanup (agent OFFLINE)
@@ -109,7 +109,8 @@ function setupAuthListener() {
       rebuildUserLayout();
       if (isAdm) {
         // Start agent heartbeat for the entire admin session (survives layout switches)
-        initAgentStatus();
+        // Awaited so the heartbeat is guaranteed running before navigation proceeds
+        await initAgentStatus();
         if (route === 'signin' || route === 'home') {
           navigate('admin');
         } else {
