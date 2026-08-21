@@ -97,6 +97,8 @@ async function loadTicketDetail(ticketId, page) {
       </div>
     </div>
 
+    ${renderLinkedTransaction(ticket)}
+
     <!-- Conversation -->
     <div id="ticket-messages" class="flex flex-col gap-3 mb-4"></div>
 
@@ -204,6 +206,58 @@ async function loadTicketDetail(ticketId, page) {
 
   // Scroll to bottom of messages
   msgContainer.scrollTop = msgContainer.scrollHeight;
+}
+
+const txStatusLabels = {
+  PENDING: 'Pending', PENDING_VERIFICATION: 'Under Verification',
+  UNDER_REVIEW: 'Under Review', CREDITED: 'Credited', REJECTED: 'Rejected',
+  PAYMENT_PENDING: 'Payment Pending', PAYMENT_PROOF_UPLOADED: 'Proof Uploaded',
+  COMPLETED: 'Completed', CANCELLED: 'Cancelled', MANUAL_REVIEW: 'Manual Review',
+};
+const txStatusColors = {
+  PENDING: 'bg-amber-500/10 text-amber-600 dark:bg-amber-500/15 dark:text-amber-400',
+  PENDING_VERIFICATION: 'bg-amber-500/10 text-amber-600 dark:bg-amber-500/15 dark:text-amber-400',
+  UNDER_REVIEW: 'bg-blue-500/10 text-blue-600 dark:bg-blue-500/15 dark:text-blue-400',
+  CREDITED: 'bg-green-500/10 text-green-600 dark:bg-green-500/15 dark:text-green-400',
+  REJECTED: 'bg-red-500/10 text-red-600 dark:bg-red-500/15 dark:text-red-400',
+  PAYMENT_PENDING: 'bg-amber-500/10 text-amber-600 dark:bg-amber-500/15 dark:text-amber-400',
+  PAYMENT_PROOF_UPLOADED: 'bg-blue-500/10 text-blue-600 dark:bg-blue-500/15 dark:text-blue-400',
+  COMPLETED: 'bg-green-500/10 text-green-600 dark:bg-green-500/15 dark:text-green-400',
+  CANCELLED: 'bg-gray-500/10 text-gray-500 dark:bg-gray-500/15 dark:text-gray-400',
+  MANUAL_REVIEW: 'bg-purple-500/10 text-purple-600 dark:bg-purple-500/15 dark:text-purple-400',
+};
+
+function renderLinkedTransaction(ticket) {
+  if (ticket.deposit_info) {
+    const di = ticket.deposit_info;
+    const txSt = txStatusLabels[di.status] || di.status;
+    const txColor = txStatusColors[di.status] || txStatusColors.PENDING;
+    return `
+      <div class="card p-4 mb-4">
+        <p class="text-[11px] font-semibold text-text-secondary dark:text-text-secondary-dark uppercase tracking-wide mb-2">Linked Deposit</p>
+        <div class="flex items-center justify-between mb-1">
+          <span class="text-[14px] font-medium text-text-primary dark:text-text-primary-dark">${di.amount} ${di.asset} via ${di.network}</span>
+          <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${txColor}">${txSt}</span>
+        </div>
+        ${di.tx_hash ? `<p class="text-[11px] text-text-secondary dark:text-text-secondary-dark truncate font-mono">TX: ${escapeHtml(di.tx_hash.slice(0, 20))}...</p>` : ''}
+      </div>
+    `;
+  }
+  if (ticket.sell_order_info) {
+    const si = ticket.sell_order_info;
+    const txSt = txStatusLabels[si.status] || si.status;
+    const txColor = txStatusColors[si.status] || txStatusColors.PENDING;
+    return `
+      <div class="card p-4 mb-4">
+        <p class="text-[11px] font-semibold text-text-secondary dark:text-text-secondary-dark uppercase tracking-wide mb-2">Linked Sell Order</p>
+        <div class="flex items-center justify-between">
+          <span class="text-[14px] font-medium text-text-primary dark:text-text-primary-dark">${si.usdt_amount} USDT → ₹${si.inr_amount} INR</span>
+          <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${txColor}">${txSt}</span>
+        </div>
+      </div>
+    `;
+  }
+  return '';
 }
 
 function renderMessage(msg, myUserId) {

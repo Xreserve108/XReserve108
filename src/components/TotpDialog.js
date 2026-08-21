@@ -33,7 +33,7 @@ export function TotpDialog({ title = 'Verify Identity', message = 'Enter the 6-d
         id="totp-input"
         autofocus
       />
-      <button type="button" id="totp-paste" class="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg px-2.5 py-1 text-[12px] font-medium text-text-secondary dark:text-text-secondary-dark hover:text-text-primary dark:hover:text-text-primary-dark hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-text-secondary dark:disabled:hover:text-text-secondary-dark disabled:hover:bg-transparent dark:disabled:hover:bg-transparent" aria-label="Paste 2FA code">Paste</button>
+      <button type="button" id="totp-paste" class="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg px-2.5 py-1 text-[12px] font-medium text-text-secondary dark:text-text-secondary-dark hover:text-text-primary dark:hover:text-text-primary-dark hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors" aria-label="Paste 2FA code">Paste</button>
       <div id="totp-error" class="hidden mb-3 rounded-xl bg-red-500/10 px-4 py-2.5 text-[13px] font-medium text-red-600 dark:text-red-400"></div>
       </div>
       <div class="flex gap-3 mt-4">
@@ -53,10 +53,8 @@ export function TotpDialog({ title = 'Verify Identity', message = 'Enter the 6-d
     const recoveryToggle = modal.querySelector('#totp-recovery-toggle');
     const pasteBtn = modal.querySelector('#totp-paste');
     let isRecoveryMode = false;
-    let focusHandler = null;
 
     function cleanup() {
-      if (focusHandler) window.removeEventListener('focus', focusHandler);
       overlay.remove();
     }
 
@@ -73,25 +71,10 @@ export function TotpDialog({ title = 'Verify Identity', message = 'Enter the 6-d
       errorEl.classList.add('hidden');
     }
 
-    // --- Clipboard-aware Paste button ---
-    const checkClipboard = async () => {
-      if (!navigator.clipboard?.readText) return;
-      if (isRecoveryMode) { pasteBtn.disabled = false; return; }
-      try {
-        const text = (await navigator.clipboard.readText()).trim();
-        pasteBtn.disabled = !/^\d{6}$/.test(text);
-      } catch {
-        pasteBtn.disabled = true;
-      }
-    };
-
-    let lastCheck = 0;
-    focusHandler = () => {
-      const now = Date.now();
-      if (now - lastCheck > 2000) { lastCheck = now; checkClipboard(); }
-    };
-    window.addEventListener('focus', focusHandler);
-    setTimeout(() => checkClipboard(), 300);
+    // Paste button is always enabled — the click handler (user gesture)
+    // performs the clipboard read, which is the only reliable approach on iOS.
+    // Background clipboard reads are NOT used because iOS blocks them without
+    // a user gesture.
 
     input.addEventListener('input', () => {
       hideError();
@@ -138,7 +121,7 @@ export function TotpDialog({ title = 'Verify Identity', message = 'Enter the 6-d
         input.dispatchEvent(new Event('input'));
         pasteBtn.style.display = 'none';
         verifyBtn.click();
-      } catch {
+      } catch (err) {
         showError('Unable to access clipboard. Please enter the code manually.');
       }
     });
@@ -211,7 +194,6 @@ export function TotpDialog({ title = 'Verify Identity', message = 'Enter the 6-d
         showError(err.message || 'Invalid code');
         input.value = '';
         pasteBtn.style.display = '';
-        checkClipboard();
         input.focus();
       }
     });
