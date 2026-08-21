@@ -170,6 +170,13 @@ async function redirectAdminFromHome(initial) {
 }
 
 export function initRouter() {
+  // Root URL (no hash) resolves to #home without adding a history entry
+  // or firing an extra hashchange — all boot logic then runs through the
+  // existing router architecture.
+  if (!window.location.hash) {
+    history.replaceState(null, '', '#home');
+  }
+
   window.addEventListener('hashchange', () => {
     const rawHash = window.location.hash.slice(1);
     const baseName = rawHash.split('?')[0];
@@ -207,7 +214,7 @@ export function initRouter() {
             currentRoute = 'admin';
             window.location.hash = 'admin';
           } else {
-            currentRoute = rawHash;
+            currentRoute = rawHash || 'home';
           }
           render();
         });
@@ -245,7 +252,7 @@ export function initRouter() {
           currentRoute = 'home';
         }
       } else {
-        currentRoute = rawInitial;
+        currentRoute = rawInitial || initial;
       }
     } else {
       currentRoute = 'home';
