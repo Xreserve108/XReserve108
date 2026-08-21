@@ -1,7 +1,6 @@
 import { registerRoute, onLayoutChange } from '@/core/router';
 import { createBottomNav, createTopBar, createDesktopSidebar } from '@/components/navigation';
 import { createAdminLayout, updateAdminNav } from '@/layouts/admin';
-import { stopAgentStatus } from '@/admin/agent-status';
 
 import { renderHome } from '@/pages/home';
 import { renderWallet } from '@/pages/wallet';
@@ -74,10 +73,9 @@ function setupUserLayout() {
 
 function handleLayoutChange(layout) {
   if (currentLayout === layout) return;
-  // Tear down the admin notification badge timer and agent heartbeat when leaving admin layout
+  // Tear down the admin notification badge timer when leaving admin layout
   if (currentLayout === 'admin' && layout !== 'admin') {
     stopAdminBadges();
-    stopAgentStatus();
   }
   currentLayout = layout;
   if (layout === 'admin') {

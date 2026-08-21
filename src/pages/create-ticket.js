@@ -89,6 +89,21 @@ export function renderCreateTicket() {
       <!-- Transaction selector (Deposit / Sell Order) -->
       <div id="tx-selector-section" class="hidden">
         <label class="block text-[13px] font-medium text-text-primary dark:text-text-primary-dark mb-1.5" id="tx-selector-label">Select Transaction</label>
+        <!-- Collapsed selected summary (shown after selection) -->
+        <div id="tx-selected-summary" class="hidden rounded-xl border border-action/30 dark:border-action-dark/30 bg-surface-light dark:bg-surface-dark p-3 cursor-pointer transition-colors hover:border-action dark:hover:border-action-dark">
+          <div class="flex items-center justify-between gap-2">
+            <div class="min-w-0 flex-1">
+              <p id="tx-summary-line1" class="text-[13px] font-medium text-text-primary dark:text-text-primary-dark truncate"></p>
+              <div class="flex items-center gap-2 mt-0.5">
+                <span id="tx-summary-status" class="inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium"></span>
+                <span id="tx-summary-line2" class="text-[11px] text-text-secondary dark:text-text-secondary-dark"></span>
+              </div>
+            </div>
+            <svg class="h-4 w-4 text-text-secondary dark:text-text-secondary-dark flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5"/></svg>
+          </div>
+          <p class="text-[10px] text-text-secondary dark:text-text-secondary-dark mt-1.5">Tap to change selection</p>
+        </div>
+        <!-- Expandable list (shown before selection or when expanding) -->
         <div id="tx-selector-list" class="flex flex-col gap-2 max-h-[220px] overflow-y-auto">
           <div class="flex items-center justify-center py-6"><div class="auth-spinner"></div></div>
         </div>
@@ -155,12 +170,13 @@ export function renderCreateTicket() {
     // Reset selection when category changes
     selectedTxId = null;
     selectedTxType = null;
+    resetTxSelectorUI(page);
 
     if (cat === 'Deposit' || cat === 'Sell Order') {
       txSection.classList.remove('hidden');
       const label = page.querySelector('#tx-selector-label');
       label.textContent = cat === 'Deposit' ? 'Select Deposit Transaction' : 'Select Sell Order';
-      loadTransactions(page, cat);
+      showTxList(page, cat);
 
       // TX Hash only for Deposit
       if (cat === 'Deposit') {
@@ -261,8 +277,62 @@ export function renderCreateTicket() {
 }
 
 // =============================================================================
-// Transaction selector
+// Transaction selector — collapse / expand
 // =============================================================================
+
+/** Reset the selector UI: hide summary, show empty list */
+function resetTxSelectorUI(page) {
+  const summary = page.querySelector('#tx-selected-summary');
+  const list = page.querySelector('#tx-selector-list');
+  if (summary) summary.classList.add('hidden');
+  if (list) {
+    list.classList.remove('hidden');
+    list.innerHTML = '<div class="flex items-center justify-center py-6"><div class="auth-spinner"></div></div>';
+  }
+}
+
+/** Show the expandable list (called on initial load or when user taps summary) */
+function showTxList(page, category) {
+  const summary = page.querySelector('#tx-selected-summary');
+  const list = page.querySelector('#tx-selector-list');
+  summary.classList.add('hidden');
+  list.classList.remove('hidden');
+  loadTransactions(page, category);
+}
+
+/** Collapse the list and show the compact selected summary */
+function collapseTxSelector(page, tx, category, type) {
+  const summary = page.querySelector('#tx-selected-summary');
+  const list = page.querySelector('#tx-selector-list');
+  const labels = category === 'Deposit' ? depositStatusLabels : sellOrderStatusLabels;
+  const colorClass = statusColors[tx.status] || statusColors.PENDING;
+  const statusLabel = labels[tx.status] || tx.status;
+  const ref = tx.id.slice(0, 8).toUpperCase();
+  const dateStr = formatDateShort(tx.created_at);
+
+  let amountStr;
+  if (type === 'deposit') {
+    amountStr = `${tx.amount} ${tx.asset || 'USDT'}`;
+  } else {
+    amountStr = `${tx.amount} USDT`;
+  }
+
+  page.querySelector('#tx-summary-line1').textContent = `#${ref}  ·  ${amountStr}`;
+  const statusEl = page.querySelector('#tx-summary-status');
+  statusEl.textContent = statusLabel;
+  statusEl.className = `inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium ${colorClass}`;
+  page.querySelector('#tx-summary-line2').textContent = dateStr;
+
+  list.classList.add('hidden');
+  summary.classList.remove('hidden');
+
+  // Tap summary → re-expand list
+  const handler = () => {
+    summary.removeEventListener('click', handler);
+    showTxList(page, category);
+  };
+  summary.addEventListener('click', handler);
+}
 
 async function loadTransactions(page, category) {
   const list = page.querySelector('#tx-selector-list');
@@ -337,6 +407,9 @@ async function loadTransactions(page, category) {
 
       selectedTxId = tx.id;
       selectedTxType = type;
+
+      // Collapse the list and show compact summary
+      setTimeout(() => collapseTxSelector(page, tx, category, type), 150);
     });
 
     list.appendChild(row);

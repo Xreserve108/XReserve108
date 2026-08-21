@@ -8,6 +8,7 @@ import { initApp, setAdminState, rebuildUserLayout } from '@/app';
 import { navigate, refreshCurrentPage, getCurrentRoute, initRouter } from '@/core/router';
 import { getWalletBalance, startWalletHeartbeat, stopWalletHeartbeat } from '@/data/wallet-data';
 import { startChatPolling, stopChatPolling } from '@/lib/chat';
+import { initAgentStatus, stopAgentStatus } from '@/admin/agent-status';
 import { supabase } from '@/lib/supabase';
 
 // Track last known admin status for logout cleanup (agent OFFLINE)
@@ -107,6 +108,8 @@ function setupAuthListener() {
       // Always rebuild layout so the wallet control appears for non-admin users too
       rebuildUserLayout();
       if (isAdm) {
+        // Start agent heartbeat for the entire admin session (survives layout switches)
+        initAgentStatus();
         if (route === 'signin' || route === 'home') {
           navigate('admin');
         } else {
@@ -145,6 +148,7 @@ function setupAuthListener() {
         try {
           await supabase.rpc('support_set_agent_status', { p_status: 'OFFLINE' });
         } catch { /* session may already be cleared */ }
+        stopAgentStatus();
         lastKnownIsAdmin = false;
       }
       // Stop the global wallet heartbeat — no longer authenticated

@@ -388,19 +388,32 @@ async function openTicketPopup(ticketId, page) {
   const escHandler = (e) => { if (e.key === 'Escape') { closePopup(); document.removeEventListener('keydown', escHandler); } };
   document.addEventListener('keydown', escHandler);
 
-  // Fetch latest ticket data
-  const { data: ticket, error } = await supabase.rpc('support_get_user_ticket', { p_ticket_id: ticketId });
+  const body = overlay.querySelector('#popup-body');
 
-  if (error || !ticket) {
-    overlay.querySelector('#popup-body').innerHTML = `<p class="text-[13px] text-red-600 dark:text-red-400 text-center py-4">Unable to load ticket</p>`;
+  // Fetch latest ticket data — wrapped in try/catch so the spinner ALWAYS resolves
+  let ticket = null;
+  try {
+    const { data, error } = await supabase.rpc('support_get_user_ticket', { p_ticket_id: ticketId });
+    if (error) {
+      body.innerHTML = `<p class="text-[13px] text-red-600 dark:text-red-400 text-center py-4">Unable to load this ticket. Please try again.</p>`;
+      return;
+    }
+    // The RPC returns JSONB — Supabase may wrap it in an array
+    ticket = Array.isArray(data) ? data[0] : data;
+  } catch {
+    body.innerHTML = `<p class="text-[13px] text-red-600 dark:text-red-400 text-center py-4">Unable to load this ticket. Please try again.</p>`;
     return;
   }
 
-  // Mark as read
-  await supabase.rpc('support_mark_ticket_read', { p_ticket_id: ticketId }).catch(() => {});
+  if (!ticket) {
+    body.innerHTML = `<p class="text-[13px] text-red-600 dark:text-red-400 text-center py-4">Unable to load this ticket. Please try again.</p>`;
+    return;
+  }
+
+  // Mark as read (fire-and-forget)
+  supabase.rpc('support_mark_ticket_read', { p_ticket_id: ticketId }).catch(() => {});
 
   const st = statusConfig[ticket.status] || statusConfig.OPEN;
-  const body = overlay.querySelector('#popup-body');
 
   // Build popup content
   let html = `
