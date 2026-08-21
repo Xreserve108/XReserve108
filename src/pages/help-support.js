@@ -80,6 +80,31 @@ export function renderHelpSupport() {
 
   loadAvailability(page);
   loadTicketList(page);
+
+  // Periodically refresh availability so user sees agent status changes
+  // without a manual page reload (lightweight: single RPC every 30s).
+  let availTimer = null;
+  availTimer = setInterval(() => {
+    const chat = getActiveChat();
+    if (!chat || chat.status === 'ENDED') {
+      loadAvailability(page);
+    }
+  }, 30000);
+
+  // Cleanup when page is removed from DOM
+  const pageObserver = new MutationObserver((mutations) => {
+    for (const m of mutations) {
+      for (const n of m.removedNodes) {
+        if (n === page) {
+          if (availTimer) clearInterval(availTimer);
+          pageObserver.disconnect();
+          return;
+        }
+      }
+    }
+  });
+  pageObserver.observe(document.body, { childList: true, subtree: true });
+
   return page;
 }
 

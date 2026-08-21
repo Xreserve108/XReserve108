@@ -3,7 +3,6 @@ import { getUser, getDisplayUsername } from '@/core/auth';
 import { navigate } from '@/core/router';
 
 const REFRESH_MS = 8000;
-const HEARTBEAT_MS = 60000; // 60-second heartbeat interval
 
 // =============================================================================
 // Admin Help & Support hub — links to Live Chat center
@@ -50,7 +49,6 @@ export function renderAdminLiveChat() {
   page.className = 'page-enter flex min-h-[calc(100dvh-120px)] flex-col px-5 pb-8 pt-8 md:px-8 lg:px-12';
 
   let refreshTimer = null;
-  let heartbeatTimer = null;
   let currentView = 'dashboard'; // 'dashboard' | 'conversation'
   let activeSessionId = null;
 
@@ -60,15 +58,16 @@ export function renderAdminLiveChat() {
         <h1 class="page-title">Live Chat</h1>
         <p class="text-muted mt-1">Manage support chat sessions</p>
       </div>
-      <div id="agent-status-control" class="flex items-center gap-2">
-        <div class="auth-spinner" style="width:16px;height:16px"></div>
-      </div>
     </div>
     <div id="chat-center-content"></div>
   `;
 
-  // Initialize agent status and render dashboard
-  initAgentStatus(page);
+  // Agent status is managed globally by the admin layout.
+  // Render dashboard and start periodic refresh.
+  renderDashboard(page);
+  refreshTimer = setInterval(() => {
+    if (currentView === 'dashboard') renderDashboard(page);
+  }, REFRESH_MS);
 
   // Cleanup when page element is removed from DOM (navigation away)
   const pageObserver = new MutationObserver((mutations) => {
@@ -76,7 +75,6 @@ export function renderAdminLiveChat() {
       for (const n of m.removedNodes) {
         if (n === page) {
           if (refreshTimer) clearInterval(refreshTimer);
-          stopHeartbeat();
           pageObserver.disconnect();
           return;
         }
@@ -86,80 +84,6 @@ export function renderAdminLiveChat() {
   pageObserver.observe(document.body, { childList: true, subtree: true });
 
   return page;
-
-  // ===========================================================================
-  // Agent Status
-  // ===========================================================================
-
-  async function initAgentStatus(page) {
-    const control = page.querySelector('#agent-status-control');
-
-    // Get current status
-    const { data: currentStatus } = await supabase.rpc('support_get_agent_status');
-    const status = currentStatus || 'OFFLINE';
-
-    renderStatusToggle(control, status);
-    renderDashboard(page);
-
-    // Start heartbeat if agent is AVAILABLE or BUSY
-    if (status === 'AVAILABLE' || status === 'BUSY') {
-      startHeartbeat();
-    }
-
-    // Start periodic refresh
-    refreshTimer = setInterval(() => {
-      if (currentView === 'dashboard') renderDashboard(page);
-    }, REFRESH_MS);
-  }
-
-  function startHeartbeat() {
-    if (heartbeatTimer !== null) return; // already running
-    // Send heartbeat immediately, then every HEARTBEAT_MS
-    supabase.rpc('support_agent_heartbeat');
-    heartbeatTimer = setInterval(() => {
-      supabase.rpc('support_agent_heartbeat');
-    }, HEARTBEAT_MS);
-  }
-
-  function stopHeartbeat() {
-    if (heartbeatTimer !== null) {
-      clearInterval(heartbeatTimer);
-      heartbeatTimer = null;
-    }
-  }
-
-  function renderStatusToggle(container, status) {
-    const colors = {
-      AVAILABLE: 'bg-green-500',
-      BUSY: 'bg-yellow-500',
-      OFFLINE: 'bg-text-secondary/40 dark:bg-text-secondary-dark/40',
-    };
-    const labels = {
-      AVAILABLE: 'Available',
-      BUSY: 'Busy',
-      OFFLINE: 'Offline',
-    };
-
-    container.innerHTML = `
-      <span class="flex h-2.5 w-2.5 rounded-full ${colors[status] || colors.OFFLINE}"></span>
-      <select id="agent-status-select" class="input-field py-1.5 px-2 text-[12px] min-w-[100px]">
-        <option value="AVAILABLE" ${status === 'AVAILABLE' ? 'selected' : ''}>Available</option>
-        <option value="BUSY" ${status === 'BUSY' ? 'selected' : ''}>Busy</option>
-        <option value="OFFLINE" ${status === 'OFFLINE' ? 'selected' : ''}>Offline</option>
-      </select>
-    `;
-
-    container.querySelector('#agent-status-select').addEventListener('change', async (e) => {
-      await supabase.rpc('support_set_agent_status', { p_status: e.target.value });
-      renderStatusToggle(container, e.target.value);
-      // Start heartbeat when going AVAILABLE/BUSY; stop when going OFFLINE
-      if (e.target.value === 'AVAILABLE' || e.target.value === 'BUSY') {
-        startHeartbeat();
-      } else {
-        stopHeartbeat();
-      }
-    });
-  }
 
   // ===========================================================================
   // Dashboard

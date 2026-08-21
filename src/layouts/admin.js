@@ -3,6 +3,7 @@ import { toggleTheme, getTheme } from '@/core/theme';
 import { getUser, getDisplayUsername } from '@/core/auth';
 import { createBottomNav } from '@/components/navigation';
 import { startAdminBadges, markUsersSeen } from '@/admin/notifications';
+import { initAgentStatus, stopAgentStatus, renderAgentStatusDropdown } from '@/admin/agent-status';
 
 const adminNavItems = [
   { route: 'admin', label: 'Dashboard' },
@@ -24,6 +25,9 @@ export function createAdminLayout() {
   const user = getUser();
   const userName = getDisplayUsername() || 'Admin';
 
+  // Initialise global agent status + heartbeat for this admin session
+  initAgentStatus();
+
   // Top bar
   const header = document.createElement('header');
   header.className = 'sticky top-0 z-40 flex items-center justify-between border-b border-border-light bg-surface-light/80 px-5 py-3 backdrop-blur-xl md:px-8 dark:border-border-dark dark:bg-surface-dark/80';
@@ -33,6 +37,7 @@ export function createAdminLayout() {
       <button id="admin-theme-toggle" class="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl p-3 text-text-secondary transition-colors duration-200 hover:bg-black/[0.04] dark:text-text-secondary-dark dark:hover:bg-white/[0.06]" aria-label="Toggle theme">
         ${getTheme() === 'dark' ? sunIcon : moonIcon}
       </button>
+      <div id="agent-status-slot" class="flex items-center gap-1"></div>
       <a id="admin-account-btn" href="#admin/profile" class="flex min-h-[44px] items-center gap-2 rounded-xl px-2 py-2 text-text-secondary transition-colors duration-200 hover:bg-black/[0.04] dark:text-text-secondary-dark dark:hover:bg-white/[0.06]" aria-label="Admin profile">
         <div id="admin-avatar" class="flex h-7 w-7 items-center justify-center overflow-hidden rounded-full bg-action text-[12px] font-semibold text-white dark:bg-action-dark dark:text-background-dark"></div>
         <span id="admin-user-name" class="hidden text-[13px] font-medium sm:inline"></span>
@@ -98,6 +103,9 @@ export function createAdminLayout() {
 
   // Start notification badge refresh loop (single guarded interval)
   startAdminBadges();
+
+  // Render agent status dropdown into the header slot
+  renderAgentStatusDropdown(header.querySelector('#agent-status-slot'));
 }
 
 export function updateAdminNav() {
