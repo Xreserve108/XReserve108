@@ -1,7 +1,7 @@
 import { supabase } from '@/lib/supabase';
 import { isAuthenticated, getUser } from '@/core/auth';
 import { navigate } from '@/core/router';
-import { getActiveChat, startChatPolling } from '@/lib/chat';
+import { getActiveChat, setActiveChatData, startChatPolling } from '@/lib/chat';
 
 const chatIcon = `<svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zM2.25 12.76c0 1.6 1.123 2.994 2.707 3.227 1.068.157 2.148.279 3.238.36a37.5 37.5 0 003.604 0c1.09-.081 2.17-.203 3.238-.36C16.623 15.754 17.75 14.36 17.75 12.76v-.012a3.019 3.019 0 00-.783-2.052A14.47 14.47 0 0012.82 7.12a.75.75 0 00-.64 0 14.47 14.47 0 00-4.147 3.588A3.019 3.019 0 007.25 12.75v.012z"/></svg>`;
 const historyIcon = `<svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>`;
@@ -257,12 +257,23 @@ async function handleStartChat() {
   try {
     const { data, error } = await supabase.rpc('support_start_live_chat');
     if (error) {
+      console.error('[help-support] support_start_live_chat FAILED', {
+        error_message: error.message,
+        error_details: error.details,
+        error_code: error.code,
+      });
+    }
+    if (error || !data || data.length === 0) {
       if (btn) {
         btn.disabled = false;
         btn.textContent = 'Start Live Chat';
       }
       return;
     }
+    // Store the session data so the chat page can use it directly
+    // without calling the RPC again (avoids a race with the polling interval).
+    const row = data[0];
+    setActiveChatData({ session_id: row.session_id, status: row.status, unread_count: 0 });
     navigate('live-chat');
   } catch {
     if (btn) {

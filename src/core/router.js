@@ -1,5 +1,6 @@
 import { isAuthenticated, isAdmin, is2FAVerified } from '@/core/auth';
 import { get2FAStatus } from '@/core/totp';
+import { notifyRouteChange } from '@/lib/chat';
 
 const routes = {};
 let currentRoute = null;
@@ -128,6 +129,9 @@ async function renderPage(container, route) {
   if (route.onMount) {
     route.onMount(container);
   }
+
+  // Let route-aware global UI (floating active-chat icon) react
+  notifyRouteChange((currentRoute || '').split('?')[0]);
 
   window.scrollTo({ top: 0, behavior: 'instant' });
 }
