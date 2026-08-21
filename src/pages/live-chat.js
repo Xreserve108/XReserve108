@@ -25,7 +25,7 @@ import {
 
 export function renderLiveChat() {
   const page = document.createElement('main');
-  page.className = 'page-enter';
+  page.className = 'page-enter flex flex-1 flex-col min-h-0';
 
   if (!isAuthenticated()) {
     navigate('signin');
@@ -44,7 +44,7 @@ export function renderLiveChat() {
   let destroyed = false;
 
   page.innerHTML = `
-    <div id="chat-shell" class="z-30 flex flex-col overflow-hidden bg-background-light dark:bg-background-dark md:static md:h-[calc(100dvh-60px)] md:rounded-2xl md:border md:border-border-light md:bg-surface-light md:dark:border-border-dark md:dark:bg-surface-dark fixed inset-x-0 top-[56px] bottom-0">
+    <div id="chat-shell" class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-border-light bg-surface-light md:border-border-light md:bg-surface-light dark:border-border-dark dark:bg-surface-dark">
       <div class="flex flex-shrink-0 items-center gap-2 border-b border-border-light bg-surface-light/90 px-3 py-2.5 backdrop-blur-xl dark:border-border-dark dark:bg-surface-dark/90 md:px-4">
         <button id="chat-back" aria-label="Back to Help and Support" class="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl text-text-secondary transition-colors hover:bg-black/[0.04] dark:text-text-secondary-dark dark:hover:bg-white/[0.06]">
           <svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5"/></svg>
@@ -53,6 +53,7 @@ export function renderLiveChat() {
           <h1 class="truncate text-[15px] font-semibold text-text-primary dark:text-text-primary-dark">Live Support</h1>
           <p id="chat-status-text" class="text-[12px] text-text-secondary dark:text-text-secondary-dark">Connecting...</p>
         </div>
+        <button id="chat-end-btn" class="flex-shrink-0 rounded-lg px-3 py-1.5 text-[12px] font-medium text-red-500 transition-colors hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/10">End Chat</button>
       </div>
       <div id="chat-body" class="flex min-h-0 flex-1 flex-col">
         <div class="flex flex-1 items-center justify-center py-12"><div class="auth-spinner"></div></div>
@@ -161,7 +162,7 @@ export function renderLiveChat() {
       const msgContainer = page.querySelector('#chat-messages');
       if (msgContainer) {
         msgContainer.innerHTML = `
-          <div data-empty-state class="flex flex-col items-center justify-center py-8 text-center">
+          <div data-empty-state class="py-8 text-center">
             <p class="text-[13px] text-text-secondary dark:text-text-secondary-dark">No messages yet — say hello!</p>
           </div>
         `;
@@ -218,16 +219,11 @@ export function renderLiveChat() {
     const body = page.querySelector('#chat-body');
     body.innerHTML = `
       <div id="chat-messages" class="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4 md:px-6" role="log" aria-label="Chat messages"></div>
-      <div id="chat-input-area" class="flex-shrink-0 border-t border-border-light bg-surface-light px-3 pt-2.5 pb-[calc(88px+env(safe-area-inset-bottom))] dark:border-border-dark dark:bg-surface-dark md:px-4 md:pb-[calc(env(safe-area-inset-bottom)+12px)]">
+      <div id="chat-input-area" class="flex-shrink-0 border-t border-border-light bg-surface-light px-3 pt-2.5 pb-2 dark:border-border-dark dark:bg-surface-dark md:px-4">
         <div class="flex items-end gap-2">
           <textarea id="chat-input" rows="1" placeholder="Type your message..." aria-label="Message" class="input-field max-h-[120px] min-w-0 flex-1 resize-none py-2.5 text-[14px] leading-relaxed" maxlength="4000"></textarea>
           <button id="chat-send" aria-label="Send message" class="flex h-[42px] w-[42px] flex-shrink-0 items-center justify-center rounded-xl bg-action text-white transition-all hover:opacity-90 disabled:opacity-40 dark:bg-action-dark dark:text-background-dark" disabled>
             <svg class="h-[18px] w-[18px]" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5"/></svg>
-          </button>
-        </div>
-        <div class="mt-2 flex justify-center">
-          <button id="chat-end-btn" class="rounded-lg px-4 py-1.5 text-[12px] font-medium text-red-500 transition-colors hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/10">
-            End Chat
           </button>
         </div>
       </div>
@@ -258,8 +254,8 @@ export function renderLiveChat() {
       if (input.value.trim() && !sending) handleSend();
     });
 
-    // End chat
-    body.querySelector('#chat-end-btn').addEventListener('click', handleEndChat);
+    // End chat (button is in the header)
+    page.querySelector('#chat-end-btn').addEventListener('click', handleEndChat);
   }
 
   function appendMessage(msg) {
@@ -376,6 +372,10 @@ export function renderLiveChat() {
     }
     updateStatusText('Chat ended', 'gray');
 
+    // Hide End Chat button — session is no longer active
+    const endBtn = page.querySelector('#chat-end-btn');
+    if (endBtn) endBtn.style.display = 'none';
+
     const body = page.querySelector('#chat-body');
     if (!body) return;
     body.innerHTML = `
@@ -476,6 +476,9 @@ export function renderLiveChat() {
   }
 
   async function handleEndChat() {
+    // Defensive guard: prevent second end-chat request after session already ended
+    if (chatStatus === 'ENDED' || !sessionId) return;
+
     // Confirmation dialog
     const overlay = document.createElement('div');
     overlay.className = 'fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm';

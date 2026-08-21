@@ -58,7 +58,7 @@ export function renderAdminHelpSupport() {
 
 export function renderAdminLiveChat() {
   const page = document.createElement('main');
-  page.className = 'page-enter flex h-[calc(100dvh-160px)] flex-col overflow-hidden px-5 pb-8 pt-6 md:px-8 lg:px-12';
+  page.className = 'page-enter flex flex-1 flex-col min-h-0 overflow-hidden';
 
   let refreshTimer = null;
   let currentView = 'dashboard'; // 'dashboard' | 'conversation'
@@ -263,19 +263,17 @@ export function renderAdminLiveChat() {
             <p class="truncate text-[15px] font-semibold text-text-primary dark:text-text-primary-dark">Chat with ${escapeHtml(username || 'User')}</p>
             <p id="conv-status" class="text-[12px] text-green-500">Active</p>
           </div>
+          <button id="conv-end" class="flex-shrink-0 rounded-lg px-3 py-1.5 text-[12px] font-medium text-red-500 transition-colors hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/10">End Chat</button>
         </div>
         <div id="conv-messages" class="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4 md:px-6" role="log" aria-label="Chat messages">
           <div class="flex flex-1 items-center justify-center py-12"><div class="auth-spinner"></div></div>
         </div>
-        <div class="flex-shrink-0 border-t border-border-light px-3 pt-2.5 pb-[calc(env(safe-area-inset-bottom)+100px)] dark:border-border-dark md:px-4 md:pb-3">
+        <div class="flex-shrink-0 border-t border-border-light px-3 pt-2.5 pb-2 dark:border-border-dark md:px-4">
           <div class="flex items-end gap-2">
             <textarea id="conv-input" rows="1" placeholder="Type your reply..." aria-label="Reply" class="input-field max-h-[120px] min-w-0 flex-1 resize-none py-2.5 text-[14px] leading-relaxed" maxlength="4000"></textarea>
             <button id="conv-send" aria-label="Send reply" class="flex h-[42px] w-[42px] flex-shrink-0 items-center justify-center rounded-xl bg-action text-white transition-all hover:opacity-90 disabled:opacity-40 dark:bg-action-dark dark:text-background-dark" disabled>
               <svg class="h-[18px] w-[18px]" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5"/></svg>
             </button>
-          </div>
-          <div class="mt-2 flex justify-center">
-            <button id="conv-end" class="rounded-lg px-4 py-1.5 text-[12px] font-medium text-red-500 transition-colors hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/10">End Chat</button>
           </div>
         </div>
       </div>
@@ -340,8 +338,8 @@ export function renderAdminLiveChat() {
     if (messages.length === 0) {
       // Empty conversation — normal state, not an error
       msgContainer.innerHTML = `
-        <div data-empty-state class="flex flex-1 flex-col items-center justify-center py-12 text-center">
-          <div class="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-black/[0.04] dark:bg-white/[0.06]">
+        <div data-empty-state class="py-8 text-center">
+          <div class="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-black/[0.04] dark:bg-white/[0.06] mx-auto">
             <svg class="h-5 w-5 text-text-secondary dark:text-text-secondary-dark" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M4.848 2.771A49.144 49.144 0 0112 2.25c2.43 0 4.817.178 7.152.52 1.978.292 3.348 2.024 3.348 3.97v6.02c0 1.946-1.37 3.678-3.348 3.97a48.901 48.901 0 01-3.476.383.39.39 0 00-.297.17l-2.755 4.133a.75.75 0 01-1.248 0l-2.755-4.133a.39.39 0 00-.297-.17 48.9 48.9 0 01-3.476-.384c-1.978-.29-3.348-2.024-3.348-3.97V6.741c0-1.946 1.37-3.678 3.348-3.97z" clip-rule="evenodd"/></svg>
           </div>
           <p class="text-[13px] font-medium text-text-secondary dark:text-text-secondary-dark">No messages yet</p>

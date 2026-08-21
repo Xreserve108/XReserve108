@@ -62,7 +62,7 @@ function setupUserLayout() {
 
   const content = document.createElement('div');
   content.id = 'page-content';
-  content.className = 'flex-1';
+  content.className = 'flex flex-1 flex-col min-h-0 pb-20 md:pb-0';
   mainWrapper.appendChild(content);
 
   const bottomNav = createBottomNav(adminState);

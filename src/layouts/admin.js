@@ -88,7 +88,7 @@ export function createAdminLayout() {
   // Content
   const content = document.createElement('div');
   content.id = 'page-content';
-  content.className = 'flex-1 pb-20 md:pb-0';
+  content.className = 'flex flex-1 flex-col min-h-0 pb-20 md:pb-0';
   app.appendChild(content);
 
   // Mobile bottom navigation
