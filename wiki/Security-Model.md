@@ -375,6 +375,41 @@ Audit records include `actor_id`, `target_type`, `target_id`, and `metadata` (JS
 
 ---
 
+## Referral System Security
+
+### Server-Authoritative Attribution
+- All referral RPCs use `auth.uid()` for user identification — no browser-supplied user IDs are trusted
+- A malicious client cannot submit another user's UUID to create a referral relationship
+- Referral code resolution is server-side: client sends code → server resolves to `referrer_id`
+- The client never supplies `referrer_id`
+
+### Atomic Redemption
+- `redeem_referral_code()` is a single `SECURITY DEFINER` transaction
+- `UNIQUE` constraint on `referred_user_id` prevents double-redemption (one referred account → maximum one referrer)
+- Race conditions handled by constraint violations caught in exception handler
+
+### Self-Referral Prevention
+- `CHECK (referrer_id != referred_user_id)` constraint at database level
+- Also checked explicitly in the RPC function body (defense in depth)
+- JavaScript validation is irrelevant — database enforces independently
+
+### Lazy Code Generation
+- Referral codes are generated on-demand when user opens the Referrals page (`get_my_referral_code()`)
+- This avoids modifying the critical `handle_new_user()` signup trigger
+- Code generation uses `pg_random_bytes(8)` for cryptographic entropy
+- Codes are 8-char uppercase alphanumeric (36^8 ≈ 2.8 trillion combinations)
+- `UNIQUE` constraint with retry loop handles collisions
+
+### RLS and IDOR Protection
+- `referral_codes`: Users can SELECT only their own code (`auth.uid() = user_id`)
+- `referral_redemptions`: Users can SELECT only where they are referrer OR referred user
+- No INSERT/UPDATE/DELETE policies for normal users — all writes via SECURITY DEFINER
+- All RPC functions revoked from `PUBLIC` and `anon`, granted only to `authenticated`
+- `search_path = public` set on all SECURITY DEFINER functions
+- Internal helper `_generate_referral_code_internal()` revoked from all roles
+
+---
+
 ## Security Summary
 
 | Layer | Mechanism |
@@ -405,3 +440,4 @@ Audit records include `actor_id`, `target_type`, `target_id`, and `metadata` (JS
 | **Chat Agent Auth** | `is_admin_user()` required for all agent operations |
 | **Chat Heartbeat** | 60s heartbeat, 3-min stale threshold, stale agents excluded from assignment |
 | **Duplicate Chat Guard** | Partial unique index prevents multiple WAITING/ACTIVE sessions per user |
+| **Referral System (Phase 31)** | Server-authoritative attribution via `auth.uid()`, atomic redemption, self-referral CHECK constraint, lazy code generation, RLS isolation |

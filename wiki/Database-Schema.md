@@ -1,6 +1,6 @@
 # Database Schema
 
-All database objects live in PostgreSQL via Supabase. The schema is managed through sequential migration files in `supabase/migrations/`, currently through migration 043.
+All database objects live in PostgreSQL via Supabase. The schema is managed through sequential migration files in `supabase/migrations/`, currently through migration 044.
 
 ---
 
@@ -620,6 +620,69 @@ Admin-only notes invisible to users.
 | `support_admin_update_ticket_priority(p_ticket_id, p_priority)` | BOOLEAN | Change priority |
 | `support_admin_get_ticket_stats()` | TABLE | Dashboard statistics (counts by status) |
 | `support_admin_mark_ticket_read(p_ticket_id)` | INT | Mark messages read as agent |
+
+---
+
+## Referral System
+
+### `referral_codes`
+Stores unique referral codes per user (lazy generation — code is created when user first opens the Referrals page).
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | UUID PK | `gen_random_uuid()` |
+| `user_id` | UUID UNIQUE FK | References `auth.users(id)` ON DELETE CASCADE |
+| `code` | VARCHAR(8) UNIQUE | 8-char alphanumeric, server-generated |
+| `created_at` | TIMESTAMPTZ | Auto |
+
+**Constraints**:
+- `uq_referral_codes_user_id` — each user has exactly one code
+- `uq_referral_codes_code` — each code is globally unique
+- `chk_referral_codes_length` — code must be exactly 8 characters
+- `chk_referral_codes_format` — code must match `^[A-Z0-9]{8}$`
+
+**Indexes**: `idx_referral_codes_code` on `code` for fast lookup during redemption.
+
+**RLS**: Users can SELECT only their own referral code (`auth.uid() = user_id`). No INSERT/UPDATE/DELETE for normal users — writes via SECURITY DEFINER only.
+
+---
+
+### `referral_redemptions`
+Tracks which user was referred by which user.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | UUID PK | `gen_random_uuid()` |
+| `referrer_id` | UUID FK | References `auth.users(id)` ON DELETE CASCADE |
+| `referred_user_id` | UUID UNIQUE FK | References `auth.users(id)` ON DELETE CASCADE |
+| `code_used` | VARCHAR(8) | The referral code that was redeemed |
+| `created_at` | TIMESTAMPTZ | Auto |
+
+**Constraints**:
+- `uq_referral_redemptions_referred_user_id` — each user can only be referred ONCE
+- `chk_referral_no_self_referral` — `referrer_id != referred_user_id` (self-referral blocked at DB level)
+
+**Indexes**: `idx_referral_redemptions_referrer_id` on `referrer_id` for fast lookup.
+
+**RLS**: Users can SELECT redemptions where they are the referrer OR the referred user. No INSERT/UPDATE/DELETE for normal users — writes via SECURITY DEFINER only.
+
+---
+
+### Referral RPCs
+
+| Function | Returns | Security | Description |
+|---|---|---|---|
+| `get_my_referral_code()` | VARCHAR(8) | SECURITY DEFINER, authenticated only | Returns user's code, generates one if none exists (lazy generation) |
+| `redeem_referral_code(p_code)` | BOOLEAN | SECURITY DEFINER, authenticated only | Atomically redeems a code for the authenticated user. Uses `auth.uid()` — no client-supplied user IDs |
+| `get_my_referral_stats()` | TABLE(referral_count, referrals) | SECURITY DEFINER, authenticated only | Returns referral count and list of referred users |
+| `_generate_referral_code_internal()` | VARCHAR(8) | SECURITY DEFINER, revoked from all roles | Internal helper using `pg_random_bytes(8)` for entropy |
+
+**Security notes**:
+- All RPCs use `auth.uid()` for user identification — no browser-supplied user IDs are trusted
+- Referral code resolution is server-authoritative: client sends code → server resolves to `referrer_id`
+- Atomic redemption with UNIQUE constraint prevents double-redemption
+- Self-referral blocked by CHECK constraint
+- Lazy generation avoids modifying the critical `handle_new_user()` signup trigger
 
 ---
 

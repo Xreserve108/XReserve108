@@ -33,6 +33,7 @@ The app uses a custom hash-based SPA router (`src/core/router.js`). Routes are r
 | `my-tickets` | `renderMyTickets` | Yes | No | user |
 | `create-ticket` | `renderCreateTicket` | Yes | No | user |
 | `ticket-detail` | `renderTicketDetail` | Yes | No | user |
+| `referrals` | `renderReferrals` | Yes | No | user |
 | `admin` | `renderAdminDashboard` | Yes | Yes | admin |
 | `admin/deposits` | `renderAdminDeposits` | Yes | Yes | admin |
 | `admin/sell-orders` | `renderAdminSellOrders` | Yes | Yes | admin |
@@ -166,18 +167,30 @@ registerRoute('routeName', {
 
 ### `profile.js` — User Profile & Settings
 - User card (avatar, name, email) or "Not signed in" state
-- Menu sections: Account, Preferences, Support
+- Menu sections: Account (Personal details, Security, Payment methods, Notifications, Orders, Referrals), Support
 - Security link → `#security`
+- Orders link → `#orders` (moved from main navigation)
+- Referrals link → `#referrals`
 - Sign out button with loading state
 - Version display (v1.1.0)
 
 ### `signup.js` — Registration
 - Creates a username/password account through the synthetic Supabase Auth email mapping
 - Validates username format and availability
+- Optional referral code field (pre-filled from `?ref=CODE` URL parameter)
+- After successful signup + 2FA enrollment, attempts referral code redemption (non-blocking — failures don't prevent account creation)
 - Requires immediate Authenticator or Passkey enrollment before setup completes
 - Enrollment establishes login assurance for the new session
 - Signup Passkey enrollment uses the age-limited `signup-authorize` server path
 - Cancelling required security setup signs the new session out
+
+### `referrals.js` — Referral Program
+- Displays user's unique referral code (lazy-generated on first visit via `get_my_referral_code` RPC)
+- Copy code and copy referral link buttons
+- Web Share API integration (falls back to clipboard copy)
+- Referral statistics: count of referred users, list with dates
+- Referral URL format: `https://xreserve.up.railway.app/#/signup?ref=CODE` (HTTPS in production)
+- Calls: `get_my_referral_code`, `get_my_referral_stats`, `redeem_referral_code` (from signup page)
 
 ### `signin.js` — Authentication
 - Username/password form backed by Supabase Auth synthetic email identities
@@ -379,8 +392,9 @@ registerRoute('routeName', {
 | Passkey | `core/passkey.js` | WebAuthn registration, login, action verification, listing, rename, and deletion |
 
 ### Navigation System
-- **Bottom nav** — Mobile-only fixed bar (4 items: Home, Wallet, Sell, Orders)
+- **Bottom nav** — Mobile-only fixed bar (3 items: Home, Wallet, Sell)
   - Wallet icon: clean wallet shape with body, fold line, and button clasp
+  - Profile accessible via user icon in top bar (not in bottom nav)
 - **Top bar** — Logo, wallet balance control (authenticated only), theme toggle, profile link, notification bell (with unread count badge)
   - Wallet balance control: Tether icon + real USDT balance + chevron
   - Balance fetched asynchronously via `getWalletBalance()` on layout creation

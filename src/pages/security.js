@@ -81,7 +81,7 @@ function renderSecurityContent(container, status, passkeys) {
     <div class="card p-6 mb-4">
       <div class="flex items-center gap-3 mb-4">
         <div class="flex h-10 w-10 items-center justify-center rounded-full ${hasPasskey ? 'bg-green-500/10 dark:bg-green-500/20' : 'bg-black/[0.04] dark:bg-white/[0.06]'}">
-          <svg class="h-5 w-5 ${hasPasskey ? 'text-green-600 dark:text-green-400' : 'text-text-secondary dark:text-text-secondary-dark'}" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25c2.25-1.5 3-3.75 3-5.25m3.75 0v-3m-3.75 3V12"/></svg>
+          <svg class="h-5 w-5 ${hasPasskey ? 'text-green-600 dark:text-green-400' : 'text-text-secondary dark:text-text-secondary-dark'}" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M7.864 4.243A7.5 7.5 0 0119.5 12c0 2.07-.84 3.94-2.197 5.303m-2.197-5.303A4.5 4.5 0 0012 7.5a4.5 4.5 0 00-3.106 4.5m6.212 0A7.478 7.478 0 0112 16.5a7.478 7.478 0 01-3.106-4.5m6.212 0c.39.39.72.84.97 1.337M8.894 12A4.486 4.486 0 0112 7.5a4.486 4.486 0 013.106 4.5m-6.212 0c-.39.39-.72.84-.97 1.337M12 16.5v1.5m-3.536-1.06A7.478 7.478 0 014.5 12c0-1.04.213-2.03.597-2.933"/></svg>
         </div>
         <div>
           <p class="text-[15px] font-semibold text-text-primary dark:text-text-primary-dark">Passkey${hasPasskey ? ` (${passkeys.length})` : ''}</p>

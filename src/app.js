@@ -33,6 +33,7 @@ import { renderAdminUsers } from '@/admin/users';
 import { renderMyTickets } from '@/pages/my-tickets';
 import { renderCreateTicket } from '@/pages/create-ticket';
 import { renderTicketDetail } from '@/pages/ticket-detail';
+import { renderReferrals } from '@/pages/referrals';
 import { startChatPolling, stopChatPolling } from '@/lib/chat';
 
 let currentLayout = null;
@@ -106,6 +107,7 @@ function registerRoutes() {
   registerRoute('my-tickets', { render: renderMyTickets, protected: true });
   registerRoute('create-ticket', { render: renderCreateTicket, protected: true });
   registerRoute('ticket-detail', { render: renderTicketDetail, protected: true });
+  registerRoute('referrals', { render: renderReferrals, protected: true });
 
   // Admin routes
   registerRoute('admin', {

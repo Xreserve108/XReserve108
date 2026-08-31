@@ -262,19 +262,19 @@ function showLogin2FAChoice() {
       <p class="text-[13px] text-text-secondary dark:text-text-secondary-dark mb-5">Choose how to verify your identity.</p>
       <div class="space-y-3">
         <button id="login-choose-totp" class="btn-secondary w-full text-left flex items-center gap-3 p-4">
-          <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-black/[0.04] dark:bg-white/[0.06]">
-            <svg class="h-5 w-5 mt-0.5 text-text-secondary dark:text-text-secondary-dark" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 1.5H8.25A2.25 2.25 0 006 3.75v16.5a2.25 2.25 0 002.25 2.25h7.5A2.25 2.25 0 0018 20.25V3.75a2.25 2.25 0 00-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-6 18.75h9m-9 0v-1.5m9 1.5v-1.5m-9 0h9"/></svg>
+          <div class="flex h-10 w-10 shrink-0 items-center justify-start pl-2 rounded-xl bg-black/[0.04] dark:bg-white/[0.06]">
+            <svg class="h-5 w-5 text-text-secondary dark:text-text-secondary-dark" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
           </div>
-          <div>
+          <div class="flex-1 min-w-0">
             <p class="text-[14px] font-semibold text-text-primary dark:text-text-primary-dark">Authenticator Code</p>
             <p class="text-[12px] text-text-secondary dark:text-text-secondary-dark">Enter 6-digit code from your app</p>
           </div>
         </button>
         <button id="login-choose-passkey" class="btn-secondary w-full text-left flex items-center gap-3 p-4">
-          <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-black/[0.04] dark:bg-white/[0.06]">
-            <svg class="h-5 w-5 text-text-secondary dark:text-text-secondary-dark" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25c2.25-1.5 3-3.75 3-5.25m3.75 0v-3m-3.75 3V12"/></svg>
+          <div class="flex h-10 w-10 shrink-0 items-center justify-start pl-2 rounded-xl bg-black/[0.04] dark:bg-white/[0.06]">
+            <svg class="h-5 w-5 text-text-secondary dark:text-text-secondary-dark" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M7.864 4.243A7.5 7.5 0 0119.5 12c0 2.07-.84 3.94-2.197 5.303m-2.197-5.303A4.5 4.5 0 0012 7.5a4.5 4.5 0 00-3.106 4.5m6.212 0A7.478 7.478 0 0112 16.5a7.478 7.478 0 01-3.106-4.5m6.212 0c.39.39.72.84.97 1.337M8.894 12A4.486 4.486 0 0112 7.5a4.486 4.486 0 013.106 4.5m-6.212 0c-.39.39-.72.84-.97 1.337M12 16.5v1.5m-3.536-1.06A7.478 7.478 0 014.5 12c0-1.04.213-2.03.597-2.933"/></svg>
           </div>
-          <div>
+          <div class="flex-1 min-w-0">
             <p class="text-[14px] font-semibold text-text-primary dark:text-text-primary-dark">Passkey</p>
             <p class="text-[12px] text-text-secondary dark:text-text-secondary-dark">Use fingerprint, face recognition, or PIN</p>
           </div>
@@ -356,8 +356,8 @@ function showLogin2FAChoice() {
         errorEl.classList.remove('hidden');
         passkeyBtn.disabled = false;
         passkeyBtn.innerHTML = `
-          <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-black/[0.04] dark:bg-white/[0.06]">
-            <svg class="h-5 w-5 text-text-secondary dark:text-text-secondary-dark" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25c2.25-1.5 3-3.75 3-5.25m3.75 0v-3m-3.75 3V12"/></svg>
+          <div class="flex h-10 w-10 shrink-0 items-center justify-start pl-2 rounded-xl bg-black/[0.04] dark:bg-white/[0.06]">
+            <svg class="h-5 w-5 text-text-secondary dark:text-text-secondary-dark" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M7.864 4.243A7.5 7.5 0 0119.5 12c0 2.07-.84 3.94-2.197 5.303m-2.197-5.303A4.5 4.5 0 0012 7.5a4.5 4.5 0 00-3.106 4.5m6.212 0A7.478 7.478 0 0112 16.5a7.478 7.478 0 01-3.106-4.5m6.212 0c.39.39.72.84.97 1.337M8.894 12A4.486 4.486 0 0112 7.5a4.486 4.486 0 013.106 4.5m-6.212 0c-.39.39-.72.84-.97 1.337M12 16.5v1.5m-3.536-1.06A7.478 7.478 0 014.5 12c0-1.04.213-2.03.597-2.933"/></svg>
           </div>
           <div>
             <p class="text-[14px] font-semibold text-text-primary dark:text-text-primary-dark">Passkey</p>
@@ -391,20 +391,20 @@ async function requireMandatory2FASetup(btn) {
         <p class="text-[13px] text-text-secondary dark:text-text-secondary-dark mb-5">Your account requires two-factor authentication. Choose a method to continue.</p>
         <div class="space-y-3">
           <button id="mandatory-choose-authenticator" class="btn-secondary w-full text-left flex items-center gap-3 p-4">
-            <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-black/[0.04] dark:bg-white/[0.06]">
-              <svg class="h-5 w-5 mt-0.5 text-text-secondary dark:text-text-secondary-dark" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 1.5H8.25A2.25 2.25 0 006 3.75v16.5a2.25 2.25 0 002.25 2.25h7.5A2.25 2.25 0 0018 20.25V3.75a2.25 2.25 0 00-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-6 18.75h9m-9 0v-1.5m9 1.5v-1.5m-9 0h9"/></svg>
+            <div class="flex h-10 w-10 shrink-0 items-center justify-start pl-2 rounded-xl bg-black/[0.04] dark:bg-white/[0.06]">
+              <svg class="h-5 w-5 text-text-secondary dark:text-text-secondary-dark" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
             </div>
-            <div>
+            <div class="flex-1 min-w-0">
               <p class="text-[14px] font-semibold text-text-primary dark:text-text-primary-dark">Authenticator App</p>
               <p class="text-[12px] text-text-secondary dark:text-text-secondary-dark">Use Google Authenticator, Authy, or similar</p>
             </div>
           </button>
           ${supportsPasskey ? `
           <button id="mandatory-choose-passkey" class="btn-secondary w-full text-left flex items-center gap-3 p-4">
-            <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-black/[0.04] dark:bg-white/[0.06]">
-              <svg class="h-5 w-5 text-text-secondary dark:text-text-secondary-dark" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25c2.25-1.5 3-3.75 3-5.25m3.75 0v-3m-3.75 3V12"/></svg>
+            <div class="flex h-10 w-10 shrink-0 items-center justify-start pl-2 rounded-xl bg-black/[0.04] dark:bg-white/[0.06]">
+              <svg class="h-5 w-5 text-text-secondary dark:text-text-secondary-dark" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M7.864 4.243A7.5 7.5 0 0119.5 12c0 2.07-.84 3.94-2.197 5.303m-2.197-5.303A4.5 4.5 0 0012 7.5a4.5 4.5 0 00-3.106 4.5m6.212 0A7.478 7.478 0 0112 16.5a7.478 7.478 0 01-3.106-4.5m6.212 0c.39.39.72.84.97 1.337M8.894 12A4.486 4.486 0 0112 7.5a4.486 4.486 0 013.106 4.5m-6.212 0c-.39.39-.72.84-.97 1.337M12 16.5v1.5m-3.536-1.06A7.478 7.478 0 014.5 12c0-1.04.213-2.03.597-2.933"/></svg>
             </div>
-            <div>
+            <div class="flex-1 min-w-0">
               <p class="text-[14px] font-semibold text-text-primary dark:text-text-primary-dark">Passkey</p>
               <p class="text-[12px] text-text-secondary dark:text-text-secondary-dark">Use fingerprint, face recognition, or device PIN</p>
             </div>

@@ -37,7 +37,7 @@
 │  │              │  │  - Enrollment    │  │    manage       │  │
 │  │              │  │    authorization │  │  - verify-      │  │
 │  │              │  │  - Support       │  │    passkey-     │  │
-│  │              │  │                  │  │    action       │  │
+│  │              │  │  - Referral ops  │  │    action       │  │
 │  └──────────────┘  └──────────────────┘  └─────────────────┘  │
 │                                                                 │
 │  ┌──────────────────────────────────────────────────────────┐  │
@@ -52,6 +52,7 @@
 │  │  notifications                                          │  │
 │  │  support_agent_status · support_chat_sessions           │  │
 │  │  support_chat_messages                                  │  │
+│  │  referral_codes · referral_redemptions                  │  │
 │  └──────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -323,6 +324,7 @@ The app has two distinct layouts that are swapped dynamically by the router:
 | `041_phase_23c_resolve_assurance_overloads.sql` | Overload resolution | Drops all old overloads from M039/M040; re-creates single signatures with `DEFAULT NULL` for `p_user_id` |
 | `042_phase_28_2fa_invariant_enforcement.sql` | 2FA invariant | `factor_removal_receipts` table, `_authorize_factor_removal` RPC, `_cleanup_factor_removal_receipt` RPC |
 | `043_phase_30_passkey_deletion_token_context.sql` | Passkey deletion fix | `_consume_verification_token_internal` — server-side token consumption with explicit `p_user_id` for Edge Functions |
+| `044_referral_system.sql` | Referral system | `referral_codes`, `referral_redemptions` tables, RLS, referral RPCs (lazy generation, atomic redemption) |
 
 ## Environment Variables
 
