@@ -287,8 +287,10 @@ Verification tokens carry an operation scope to prevent cross-context reuse:
 
 #### Login and Action Verification
 - Login Passkey authentication uses Supabase Auth and may establish or replace the browser session
+- **Cross-account protection (login)**: `signInWithPasskey()` creates a new session for the WebAuthn credential owner. The login flow in `signin.js` captures the password-authenticated user's ID BEFORE the passkey ceremony and verifies it matches the post-ceremony session user. Fail-closed: if either user ID is missing or they differ, the user is signed out immediately. This prevents one account's passkey from authenticating a different account's login.
 - Action verification uses a two-step WebAuthn ceremony and `verify-passkey-action`
 - `verify-passkey-action` verifies the credential through raw GoTrue HTTP so the existing browser session is not replaced
+- **Cross-account protection (step-up)**: `verify-passkey-action` checks that the credential owner (from GoTrue's `user.id` response) matches the JWT user. Mismatch returns 403 "Credential ownership mismatch".
 - The GoTrue verify endpoint authenticates via the `apikey` header only (anon key) — the challenge itself is bound to the user's session, providing user context. Neither a user JWT nor a service role key should be sent in the `Authorization` header. The `X-Supabase-Api-Version` header must match the SDK's expected version.
 - Credential ownership must match the JWT user (extracted from `user.id` in GoTrue's response)
 - Successful action verification creates a five-minute verification token with the requested scope and `source_challenge_id`
@@ -389,6 +391,7 @@ Audit records include `actor_id`, `target_type`, `target_id`, and `metadata` (JS
 | **Blockchain Verification** | TronGrid API, Edge Function with shared secret |
 | **2FA Invariant (Phase 28)** | `active_2fa_methods >= 1` enforced via advisory lock + factor-removal receipts |
 | **WebAuthn Domain (Phase 29)** | RP ID `xreserve.up.railway.app`, production HTTPS origin only, configured via Management API |
+| **Passkey Cross-Account Protection** | Login: pre/post session user_id comparison (fail-closed). Step-up: GoTrue response user_id vs JWT user_id check |
 | **2FA Verification** | Edge Functions issue scoped tokens after TOTP or Passkey verification |
 | **Scope Enforcement** | Strict matching: `user_transaction`, `admin_financial`, `admin_settings`, `passkey_enrollment` |
 | **Atomic Token Consumption** | `SELECT FOR UPDATE` prevents race conditions |

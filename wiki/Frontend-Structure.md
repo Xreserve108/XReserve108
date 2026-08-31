@@ -105,7 +105,8 @@ registerRoute('routeName', {
 - Existing-user registration requires a `passkey_enrollment` verification token before WebAuthn begins
 - Uses Supabase Auth two-step Passkey registration and authentication APIs
 - Uses raw verification through `verify-passkey-action` for sensitive actions so the current session is not replaced
-- Login Passkey authentication uses `signInWithPasskey()` followed by `verifyPasskeyAction('login')` which establishes login assurance for the new session
+- Login Passkey authentication uses `signInWithPasskey()` followed by `establishPasskeyLoginAssurance()` which establishes login assurance for the new session
+- **Cross-account protection**: Login captures the password-authenticated user's ID before the passkey ceremony and rejects the login if the post-ceremony session belongs to a different user (fail-closed)
 - Lists, renames, and deletes Passkeys through `passkey-manage`
 - `browserSupportsPasskeys()` gates Passkey UI by browser capability
 
@@ -183,6 +184,7 @@ registerRoute('routeName', {
 - Sets `login2faPending` before password authentication
 - Detects enabled Authenticator and registered Passkeys
 - Authenticator-only, Passkey-only, and factor-choice login flows
+- **Passkey cross-account guard**: Both the passkey-only path and the 2FA choice dialog capture the password user's ID before `signInWithPasskey()` and verify it matches the resulting session user (fail-closed)
 - Successful 2FA verification establishes server-side login assurance (session-bound)
 - Security-state failures and cancelled login verification sign the user out
 - Legacy zero-factor users enter mandatory, non-dismissible Authenticator or Passkey setup

@@ -4,6 +4,7 @@ import { normalizeUsername } from '@/core/username';
 import { get2FAStatus, begin2FAEnrollment, confirm2FAEnrollment, renderQRCode } from '@/core/totp';
 import { signInWithPasskey, establishPasskeyLoginAssurance, browserSupportsPasskeys, listPasskeys, registerPasskeyMandatory } from '@/core/passkey';
 import { TotpDialog } from '@/components/TotpDialog';
+import { supabase } from '@/lib/supabase';
 
 export function renderSignIn() {
   const page = document.createElement('main');
@@ -142,7 +143,23 @@ async function handleUsernameSignIn(e) {
             await showLogin2FAChoice();
           } else if (hasPasskey) {
             // Passkey only — replace session then establish login assurance
-            await signInWithPasskey();
+            // SECURITY: Capture the user who authenticated with password BEFORE
+            // the passkey ceremony replaces the session.
+            const { data: { session: _prePasskeySession } } = await supabase.auth.getSession();
+            const _originalUserId = _prePasskeySession?.user?.id;
+
+            const passkeyData = await signInWithPasskey();
+
+            // Cross-account protection: the passkey ceremony creates a new session
+            // for the credential owner. If that doesn't match the password user,
+            // a different account's passkey was used — reject immediately.
+            // Fail-closed: if either user ID is missing, reject for safety.
+            const _passkeyUserId = passkeyData?.session?.user?.id;
+            if (!_originalUserId || !_passkeyUserId || _passkeyUserId !== _originalUserId) {
+              await signOut().catch(() => {});
+              throw new Error('Passkey does not belong to this account');
+            }
+
             await establishPasskeyLoginAssurance();
           } else {
             // TOTP only — Edge Function establishes login assurance
@@ -312,8 +329,24 @@ function showLogin2FAChoice() {
       passkeyBtn.disabled = true;
       passkeyBtn.innerHTML = `<div class="auth-spinner"></div><span>Verifying...</span>`;
       try {
+        // SECURITY: Capture the user who authenticated with password BEFORE
+        // the passkey ceremony replaces the session.
+        const { data: { session: _prePasskeySession } } = await supabase.auth.getSession();
+        const _originalUserId = _prePasskeySession?.user?.id;
+
         // Replace session with passkey-authenticated session
-        await signInWithPasskey();
+        const passkeyData = await signInWithPasskey();
+
+        // Cross-account protection: the passkey ceremony creates a new session
+        // for the credential owner. If that doesn't match the password user,
+        // a different account's passkey was used — reject immediately.
+        // Fail-closed: if either user ID is missing, reject for safety.
+        const _passkeyUserId = passkeyData?.session?.user?.id;
+        if (!_originalUserId || !_passkeyUserId || _passkeyUserId !== _originalUserId) {
+          await signOut().catch(() => {});
+          throw new Error('Passkey does not belong to this account');
+        }
+
         // Establish login assurance (passkey ceremony is the proof)
         await establishPasskeyLoginAssurance();
         cleanup();
