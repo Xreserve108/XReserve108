@@ -48,7 +48,7 @@ export function createAdminLayout() {
   // Safely set user data via textContent / DOM
   const avatarEl = header.querySelector('#admin-avatar');
   const nameEl = header.querySelector('#admin-user-name');
-  if (user?.user_metadata?.avatar_url) {
+  if (user?.user_metadata?.avatar_url && user.user_metadata.avatar_url.startsWith('https://')) {
     const img = document.createElement('img');
     img.src = user.user_metadata.avatar_url;
     img.alt = '';

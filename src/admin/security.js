@@ -49,7 +49,7 @@ async function loadAdminSecurity(page) {
     container.className = '';
     buildAdminSecurityHTML(container, status, passkeys);
   } catch (err) {
-    container.innerHTML = `<div class="card p-6 text-center"><p class="text-[14px] text-red-600 dark:text-red-400">${err.message || 'Failed to load'}</p></div>`;
+    container.innerHTML = `<div class="card p-6 text-center"><p class="text-[14px] text-red-600 dark:text-red-400">${escapeHtml(err.message || 'Failed to load')}</p></div>`;
   }
 }
 
@@ -505,4 +505,13 @@ function showFeedback(el, message, color) {
   }`;
   el.textContent = message;
   el.classList.remove('hidden');
+}
+
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
 }

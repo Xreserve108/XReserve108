@@ -84,6 +84,7 @@ All user-facing tables have RLS enabled. Policies ensure users can only access t
 | `sell_orders` | `auth.uid() = user_id` | None |
 | `admin_users` | Active admin can read own row | None (writes via `add_admin` RPC; original UPDATE policy dropped in Migrations 008/021) |
 | `deposit_methods` | Admins can read all; authenticated users can read active methods | None (admin-only writes) |
+| `bank_accounts` | `auth.uid() = user_id` | None (writes via 2FA-protected RPCs; direct INSERT/DELETE revoked) |
 | `notifications` | `auth.uid() = user_id` | `auth.uid() = user_id` (mark read only) |
 | `support_agent_status` | `agent_id = auth.uid()` | None (writes via RPC) |
 | `support_chat_sessions` | `user_id = auth.uid() OR agent_id = auth.uid()` | None (writes via RPC) |
@@ -224,7 +225,7 @@ Verification tokens carry an operation scope to prevent cross-context reuse:
 | Scope | Used By |
 |---|---|
 | `login` | Interactive login (TOTP, recovery code, Passkey login, mandatory enrollment) |
-| `user_transaction` | `create_sell_order`, `submit_deposit` |
+| `user_transaction` | `create_sell_order`, `submit_deposit`, `add_bank_account`, `delete_bank_account` |
 | `admin_financial` | `admin_credit_deposit`, `admin_update_deposit_status`, `admin_complete_sell_order`, `admin_reject_sell_order` |
 | `admin_settings` | `admin_update_exchange_rate`, `admin_set_deposit_method`, `admin_toggle_deposit_method` |
 | `passkey_enrollment` | Existing-user Passkey enrollment authorization |
@@ -272,6 +273,7 @@ Verification tokens carry an operation scope to prevent cross-context reuse:
 ### Mandatory 2FA
 - **Deposits**: `submit_deposit` RPC requires a valid `verification_id` with `user_transaction` scope
 - **Sell orders**: `create_sell_order` requires a valid `verification_id` with `user_transaction` scope
+- **Bank accounts**: `add_bank_account` and `delete_bank_account` require a valid `verification_id` with `user_transaction` scope
 - **Admin financial operations**: All admin financial RPCs require `verification_id` with `admin_financial` scope
 - **Admin settings**: Exchange rate changes (`admin_update_exchange_rate`) and deposit method configuration require `verification_id` with `admin_settings` scope
 - **Admin panel access**: Router redirects to security setup if neither an Authenticator nor a Passkey is configured

@@ -1,6 +1,6 @@
 # Database Schema
 
-All database objects live in PostgreSQL via Supabase. The schema is managed through sequential migration files in `supabase/migrations/`, currently through migration 044.
+All database objects live in PostgreSQL via Supabase. The schema is managed through sequential migration files in `supabase/migrations/`, currently through migration 049.
 
 ---
 
@@ -134,6 +134,28 @@ Admin-configurable deposit method registry (Phase 12A).
 - `chk_active_method_has_address` — active method must have a non-empty deposit address
 
 **RLS**: Authenticated users can SELECT active methods. Admins can SELECT all methods. All client INSERT/UPDATE/DELETE revoked — writes go through admin RPC functions.
+
+---
+
+### `bank_accounts`
+User-managed bank accounts for sell order INR payouts (Phase 15).
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | UUID PK | `gen_random_uuid()` |
+| `user_id` | UUID FK | References `profiles(id)` ON DELETE CASCADE |
+| `bank_name` | TEXT | NOT NULL, non-empty |
+| `ifsc_code` | TEXT | NOT NULL, non-empty |
+| `account_number` | TEXT | NOT NULL, non-empty |
+| `account_holder_name` | TEXT | NOT NULL, non-empty |
+| `created_at` | TIMESTAMPTZ | Auto |
+| `updated_at` | TIMESTAMPTZ | Auto-updated via trigger |
+
+**Indexes**: `idx_bank_accounts_user_id` — `(user_id)` for user lookup.
+
+**Constraints**: Server-side trigger (`enforce_bank_account_limit`) enforces maximum 2 accounts per user with advisory lock serialization.
+
+**RLS**: Enabled. No client INSERT/UPDATE/DELETE policies — all mutations go through 2FA-protected `SECURITY DEFINER` RPCs (`add_bank_account`, `delete_bank_account`). Direct INSERT and DELETE privileges revoked from all client roles.
 
 ---
 
@@ -435,6 +457,8 @@ Individual messages within chat sessions (Phase 22).
 | `submit_deposit(network, declared_amount, tx_hash, blockchain_url, verification_id)` | Submit deposit claim (Phase 12C) | Yes (`user_transaction` verification token) |
 | `get_user_pending_deposits()` | List user's pending verification deposits (Phase 12C) | No (auth required) |
 | `create_sell_order(..., verification_id)` | Create sell order with reserved USDT | Yes (`user_transaction` verification token) |
+| `add_bank_account(bank_name, ifsc_code, account_number, account_holder_name, verification_id)` | Add bank account (Phase 15) | Yes (`user_transaction` verification token) |
+| `delete_bank_account(bank_account_id, verification_id)` | Delete bank account (Phase 33) | Yes (`user_transaction` verification token) |
 | `get_active_deposit_methods()` | List active deposit methods (Phase 12A) | No (auth required) |
 | `get_user_notifications(limit, offset)` | List user's notifications (paginated) | No (auth required) |
 | `mark_notification_read(id)` | Mark a notification as read | No (auth required) |
@@ -508,6 +532,7 @@ Individual messages within chat sessions (Phase 22).
 | `_authorize_factor_removal(factor_type, current_passkey_count)` | Atomic 2FA invariant check with advisory lock; creates receipt for passkey deletion (Phase 28) |
 | `_cleanup_factor_removal_receipt(factor_type)` | Delete most recent uncompleted receipt after successful GoTrue operation (Phase 28) |
 | `_check_passkey_enrollment_auth()` | Trigger helper that atomically consumes a valid enrollment authorization |
+| `enforce_bank_account_limit()` | Trigger: max 2 bank accounts per user with advisory lock serialization |
 | `handle_new_user()` | Trigger: auto-create profile + wallet + balance + notify admins on signup |
 | `set_updated_at()` | Trigger: auto-update `updated_at` column |
 | `block_ledger_mutation()` | Trigger: prevent UPDATE/DELETE on ledger_entries |
@@ -535,6 +560,8 @@ Individual messages within chat sessions (Phase 22).
 | `trg_admin_users_updated_at` | `admin_users` | BEFORE UPDATE | `set_updated_at()` |
 | `trg_deposit_methods_updated_at` | `deposit_methods` | BEFORE UPDATE | `set_updated_at()` |
 | `trg_block_ledger_mutation` | `ledger_entries` | BEFORE UPDATE OR DELETE | `block_ledger_mutation()` — raises exception |
+| `bank_accounts_updated_at_trigger` | `bank_accounts` | BEFORE UPDATE | `set_updated_at()` |
+| `bank_account_limit_trigger` | `bank_accounts` | BEFORE INSERT | `enforce_bank_account_limit()` — max 2 accounts per user |
 | `trg_support_chat_updated` | `support_chat_sessions` | BEFORE UPDATE | `_support_chat_updated_trigger()` — auto-updates `updated_at` |
 | `trg_support_ticket_updated` | `support_tickets` | BEFORE UPDATE | `set_updated_at()` |
 | `check_passkey_enrollment_auth` | `auth.webauthn_credentials` | AFTER INSERT | `_check_passkey_enrollment_auth()` — requires and consumes server enrollment authorization |

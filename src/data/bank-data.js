@@ -41,15 +41,22 @@ export async function addBankAccount({ bankName, ifscCode, accountNumber, accoun
 
 /**
  * Delete a bank account owned by the authenticated user.
- * RLS ensures users can only delete their own accounts.
+ * Requires a verification_id obtained from 2FA verification; the token is
+ * consumed server-side by the delete_bank_account RPC (_require_2fa_verification).
+ * Server-side RPC enforces ownership and 2FA authorization.
  */
-export async function deleteBankAccount(id) {
-  const { error } = await supabase
-    .from('bank_accounts')
-    .delete()
-    .eq('id', id);
+export async function deleteBankAccount(id, verificationId) {
+  if (!verificationId) {
+    throw new Error('2FA verification is required');
+  }
+
+  const { data, error } = await supabase.rpc('delete_bank_account', {
+    p_bank_account_id: id,
+    p_verification_id: verificationId,
+  });
 
   if (error) throw error;
+  return data;
 }
 
 /**

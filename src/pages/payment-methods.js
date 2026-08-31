@@ -107,7 +107,7 @@ async function loadBankAccountsList(container) {
       content.appendChild(addBtn);
     }
   } catch (err) {
-    content.innerHTML = `<div class="card p-6 text-center"><p class="text-[14px] text-red-600 dark:text-red-400">${err.message || 'Failed to load bank accounts'}</p></div>`;
+    content.innerHTML = `<div class="card p-6 text-center"><p class="text-[14px] text-red-600 dark:text-red-400">${escapeHtml(err.message || 'Failed to load bank accounts')}</p></div>`;
   }
 
   if (feedback) feedback.classList.add('hidden');
@@ -135,15 +135,21 @@ function confirmDeleteBankAccount(id, container) {
   overlay.querySelector('#confirm-delete-bank').addEventListener('click', async () => {
     const btn = overlay.querySelector('#confirm-delete-bank');
     btn.disabled = true;
-    btn.textContent = 'Deleting...';
+    btn.textContent = 'Verifying...';
     try {
-      await deleteBankAccount(id);
+      const verificationId = await requireVerification('Delete Bank Account', 'user_transaction');
+      btn.textContent = 'Deleting...';
+      await deleteBankAccount(id, verificationId);
       overlay.remove();
       showFeedback(feedback, 'Bank account deleted', 'green');
       await loadBankAccountsList(container);
     } catch (err) {
       overlay.remove();
-      showFeedback(feedback, err.message || 'Failed to delete bank account', 'red');
+      if (err.message === 'cancelled') {
+        // User dismissed 2FA dialog — no feedback needed
+      } else {
+        showFeedback(feedback, err.message || 'Failed to delete bank account', 'red');
+      }
     }
   });
 }

@@ -44,8 +44,8 @@
 │  │              Database Tables (PostgreSQL)                 │  │
 │  │                                                          │  │
 │  │  profiles · wallets · wallet_balances · ledger_entries   │  │
-│  │  deposits · sell_orders · exchange_settings             │  │
-│  │  deposit_methods · admin_users · audit_logs             │  │
+│  │  deposits · sell_orders · exchange_settings · audit_logs│  │
+│  │  deposit_methods · bank_accounts · admin_users          │  │
 │  │  user_2fa · recovery_codes · user_2fa_verifications     │  │
 │  │  passkey_enrollment_authorizations · auth WebAuthn data │  │
 │  │  factor_removal_receipts · login_assurance              │  │
@@ -325,6 +325,11 @@ The app has two distinct layouts that are swapped dynamically by the router:
 | `042_phase_28_2fa_invariant_enforcement.sql` | 2FA invariant | `factor_removal_receipts` table, `_authorize_factor_removal` RPC, `_cleanup_factor_removal_receipt` RPC |
 | `043_phase_30_passkey_deletion_token_context.sql` | Passkey deletion fix | `_consume_verification_token_internal` — server-side token consumption with explicit `p_user_id` for Edge Functions |
 | `044_referral_system.sql` | Referral system | `referral_codes`, `referral_redemptions` tables, RLS, referral RPCs (lazy generation, atomic redemption) |
+| `045_fix_referral_code_generation_pgcompat.sql` | Referral fix | PostgreSQL compatibility fix for referral code generation |
+| `046_fix_referral_code_no_extensions.sql` | Referral fix | Removes pgcrypto extension dependency from referral code generation |
+| `047_fix_referral_stats_return_type.sql` | Referral fix | Fixes referral stats RPC return type |
+| `048_referral_stats_include_username.sql` | Referral stats | Includes referred usernames in referral stats output |
+| `049_bank_account_deletion_2fa.sql` | Phase 33 | 2FA-protected bank account deletion RPC; removes direct DELETE path |
 
 ## Environment Variables
 
