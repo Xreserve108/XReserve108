@@ -236,9 +236,10 @@ Verification tokens carry an operation scope to prevent cross-context reuse:
 - This prevents race conditions where concurrent RPC calls could consume the same token twice
 - The lock is acquired before any validation checks, ensuring atomicity
 - Token consumption and validation occur within the same database transaction
-- `_consume_verification_token()` derives the caller identity from `auth.uid()`; every caller, including an Edge Function, must preserve the authenticated user's JWT context for ownership validation
+- `_consume_verification_token()` derives the caller identity from `auth.uid()`; this function is revoked from `authenticated`, `anon`, and `public` (Migration 006) — only internal server-side callers (SECURITY DEFINER functions) can invoke it
+- Edge Functions that need to consume verification tokens use `_consume_verification_token_internal(p_token_id, p_required_scope, p_user_id)` (Migration 043) via `serviceClient()`. The `p_user_id` parameter comes exclusively from `verifyAuth(req)` (validated JWT), never from the browser. This preserves ownership validation without requiring user-JWT PostgREST access.
 - Service-role access to protected tables does not replace the required user identity context
-- **Exception**: Login assurance establishment (`establish_login_assurance`) accepts an explicit `p_user_id` parameter so Edge Functions (which use service-role clients where `auth.uid()` returns NULL) can establish assurance without requiring user-JWT context
+- **Exception**: Login assurance establishment (`establish_login_assurance`) and internal token consumption (`_consume_verification_token_internal`) accept an explicit `p_user_id` parameter so Edge Functions (which use service-role clients where `auth.uid()` returns NULL) can operate without requiring user-JWT context
 
 ### Login Assurance (Session-Bound 2FA Proof)
 - `login_assurance` table stores session-bound records tying 2FA completion to a specific Supabase JWT `session_id`

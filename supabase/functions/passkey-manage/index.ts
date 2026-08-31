@@ -53,9 +53,26 @@ Deno.serve(async (req) => {
         return CORS.error("Invalid scope", 400);
       }
 
-      // HIGH-2 FIX: Create a user-JWT client for _consume_verification_token.
-      // The RPC uses auth.uid() for ownership, which requires user-JWT context
-      // (service-role returns NULL for auth.uid()).
+      // PHASE 30 FIX: Consume the verification token via serviceClient +
+      // _consume_verification_token_internal.  The original
+      // _consume_verification_token has EXECUTE revoked from authenticated
+      // (Migration 006), so calling it via userClient/PostgREST fails with
+      // "permission denied".  The internal variant accepts an explicit
+      // p_user_id (from verifyAuth above) instead of auth.uid().
+      // Security: userId comes from the validated JWT, NOT from the browser.
+      const { error: consumeError } = await supabase.rpc(
+        "_consume_verification_token_internal",
+        {
+          p_token_id: verificationId,
+          p_required_scope: requestedScope,
+          p_user_id: userId,
+        }
+      );
+      if (consumeError) {
+        return CORS.error(consumeError.message || "Invalid verification", 400);
+      }
+
+      // User-JWT client for RPCs that rely on auth.uid()
       const authorization = req.headers.get("authorization");
       if (!authorization) return CORS.error("Authentication required", 401);
 
@@ -71,15 +88,6 @@ Deno.serve(async (req) => {
           },
         },
       );
-
-      // Consume the verification token using user-JWT client (HIGH-2 fix)
-      const { error: consumeError } = await userClient.rpc(
-        "_consume_verification_token",
-        { p_token_id: verificationId, p_required_scope: requestedScope }
-      );
-      if (consumeError) {
-        return CORS.error(consumeError.message || "Invalid verification", 400);
-      }
 
       // List current passkeys via admin API (raw HTTP) — requires service-role
       const listRes = await fetch(

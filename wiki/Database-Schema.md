@@ -1,6 +1,6 @@
 # Database Schema
 
-All database objects live in PostgreSQL via Supabase. The schema is managed through sequential migration files in `supabase/migrations/`, currently through migration 042.
+All database objects live in PostgreSQL via Supabase. The schema is managed through sequential migration files in `supabase/migrations/`, currently through migration 043.
 
 ---
 
@@ -299,7 +299,7 @@ Single-use verification tokens issued after successful Authenticator or Passkey 
 | `used_at` | TIMESTAMPTZ | When atomically consumed |
 | `source_challenge_id` | UUID | Passkey challenge identifier; nullable for TOTP, uniquely indexed when present |
 
-**Consumption rules**: `_consume_verification_token(p_token_id, p_required_scope)` locks the row, requires `auth.uid()` ownership, rejects expired/used tokens, enforces exact scope matching, and marks the token used in the same transaction.
+**Consumption rules**: `_consume_verification_token(p_token_id, p_required_scope)` locks the row, requires `auth.uid()` ownership, rejects expired/used tokens, enforces exact scope matching, and marks the token used in the same transaction. An internal variant `_consume_verification_token_internal(p_token_id, p_required_scope, p_user_id)` accepts an explicit user ID for Edge Functions that call via `serviceClient()` (Migration 043); it preserves all security semantics (ownership, expiry, replay, scope) without requiring `auth.uid()` context.
 
 **Access**: Client access is revoked; tokens are created by security Edge Functions and consumed by internal database helpers.
 
@@ -500,7 +500,8 @@ Individual messages within chat sessions (Phase 22).
 | Function | Purpose |
 |---|---|
 | `_create_verification_token(user_id, scope, expires, source_challenge_id)` | Create a scoped token; Passkey challenges are recorded for replay prevention |
-| `_consume_verification_token(token_id, required_scope)` | Atomically validate ownership, expiry, single-use state, and exact scope, then consume the token |
+| `_consume_verification_token(token_id, required_scope)` | Atomically validate ownership, expiry, single-use state, and exact scope, then consume the token. Revoked from `authenticated`, `anon`, `public` (Migration 006). |
+| `_consume_verification_token_internal(token_id, required_scope, user_id)` | Internal variant accepting explicit `p_user_id` for Edge Functions calling via `serviceClient()`. Same security semantics. Revoked from all client roles (Migration 043). |
 | `_require_2fa_verification(verification_id, scope)` | Validate and consume a token produced by either Authenticator or Passkey verification |
 | `_require_2fa_enabled()` | Check whether the Authenticator is enabled (no token needed) |
 | `_require_admin_2fa(verification_id, scope)` | Admin check plus scoped token validation |

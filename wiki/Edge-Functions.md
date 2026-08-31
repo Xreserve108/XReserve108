@@ -176,7 +176,7 @@ The raw HTTP verification path is deliberate: using the SDK verification helper 
 
 Passkey registration itself remains a Supabase Auth/WebAuthn operation. The Edge Function creates the server-side authorization that the `auth.webauthn_credentials` insert trigger requires.
 
-**Caller identity requirement**: `_consume_verification_token()` validates ownership through `auth.uid()`. Calls from this Edge Function must therefore preserve the authenticated user's JWT context when invoking that RPC; service-role table privileges alone do not provide the user's identity. The `delete` action creates a user-JWT client (same pattern as `authorize-enrollment`) for token consumption and invariant enforcement.
+**Caller identity requirement (Phase 30)**: The `delete` action consumes a verification token via `_consume_verification_token_internal(p_token_id, p_required_scope, p_user_id)` using `serviceClient()`. The `p_user_id` comes exclusively from `verifyAuth(req)` (validated JWT), never from the browser. This replaces the previous `userClient.rpc('_consume_verification_token')` pattern which failed because `_consume_verification_token` has EXECUTE revoked from `authenticated` (Migration 006). The user-JWT client is retained for `_authorize_factor_removal` and `_cleanup_factor_removal_receipt` which rely on `auth.uid()`.
 
 **2FA invariant enforcement (Phase 28)**: The `delete` action calls `_authorize_factor_removal('passkey', passkeyCount)` after listing passkeys. This uses a transaction-level advisory lock to serialize concurrent factor-removal operations. After successful GoTrue deletion, the receipt is cleaned up via `_cleanup_factor_removal_receipt('passkey')`.
 
