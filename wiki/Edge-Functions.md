@@ -1,6 +1,6 @@
 # Edge Functions
 
-XReserve uses Supabase Edge Functions (Deno) for all TOTP-related operations, blockchain verification, and market data aggregation. This ensures TOTP secrets are generated and verified in a secure server-side environment, blockchain data is fetched without exposing API keys to the browser, and the authoritative platform rate is read server-side without exposing `exchange_settings` to clients.
+XReserve uses Supabase Edge Functions (Deno) for TOTP operations, Passkey action verification and management, blockchain verification, and market data aggregation. Security-sensitive secrets and service-role operations remain server-side.
 
 **Location**: `supabase/functions/`
 
@@ -23,6 +23,7 @@ Provides utilities used by all Edge Functions:
 | `sha256(input)` | SHA-256 hash (for code hashing / replay prevention) |
 | `authenticator` | Pre-instantiated `otplib.authenticator` instance (lowercase export from otplib) |
 | `readJson(req)` | Safely parse request body as JSON |
+| `extractSessionId(req)` | Decode JWT payload to extract the Supabase `session_id` claim (used for login assurance) |
 
 ### Encryption Details
 
@@ -87,6 +88,7 @@ Provides utilities used by all Edge Functions:
 8. Generate 10 recovery codes (8 chars each, crypto-random from `ABCDEFGHJKLMNPQRSTUVWXYZ23456789`)
 9. Hash each code with SHA-256, insert into `recovery_codes` table
 10. Insert audit log: `2FA_ENABLED`
+11. Establish login assurance via `establish_login_assurance_direct(p_session_id, p_user_id)` — binds 2FA completion to the session
 
 **Response**: `{ success: true, recovery_codes: string[] }`
 
@@ -102,7 +104,7 @@ Provides utilities used by all Edge Functions:
 
 **Request body**: `{ code: string, scope?: string }`
 
-**Supported scopes**: `user_transaction`, `admin_financial`, `admin_settings`
+**Supported scopes**: `user_transaction`, `admin_financial`, `admin_settings`, `passkey_enrollment`
 
 **Process**:
 1. Authenticate user
@@ -122,39 +124,91 @@ Provides utilities used by all Edge Functions:
    - `operation_scope`: provided scope or null
 9. Update `user_2fa`: reset `failed_attempts`, set `last_verified_at`, set `last_code_hash`
 10. Audit log: `2FA_VERIFIED`
+11. **Login assurance** (when scope is `login`): establish assurance via `establish_login_assurance(p_session_id, p_verification_token, p_user_id)` — consumes the token and binds 2FA completion to the session
 
 **Response**: `{ verification_id: string }`
 
 **Verification Token Lifecycle**:
 - Created with 5-minute TTL
-- Single-use (marked `used=true` when consumed by an RPC function)
-- Scoped to an operation (e.g., `user_transaction`, `admin_financial`)
-- Consumed by `_require_2fa_verification()` in PostgreSQL RPC functions
+- Bound to the authenticated user
+- Single-use through atomic database consumption
+- Strictly scoped; null-scoped tokens cannot authorize scoped operations
+- Consumed through `_consume_verification_token(p_token_id, p_required_scope)` directly or through `_require_2fa_verification()`
+
+---
+
+### `verify-passkey-action`
+
+**Purpose**: Verify a Passkey for a sensitive action and issue a scoped `verification_id` without replacing the current browser session.
+
+**Auth**: Required JWT.
+
+**Request body**: `{ challengeId, credential, scope? }`
+
+**Process**:
+1. Validate the JWT and scope
+2. Call GoTrue's raw passkey verification endpoint with `apikey` (anon key) and `X-Supabase-Api-Version` headers only — NO `Authorization` header. The challenge itself is bound to the user's session, providing user context. Sending an Authorization header (user JWT or service key) causes GoTrue to reject with 403.
+3. Require the returned user (from `user.id` in the response) to match the JWT user
+4. Create a five-minute verification token through `_create_verification_token`
+5. Store `source_challenge_id` for replay protection
+6. Write `PASSKEY_ACTION_VERIFIED` audit metadata
+7. **Login assurance** (when scope is `login`): establish assurance via `establish_login_assurance(p_session_id, p_verification_token, p_user_id)`
+
+**Response**: `{ verification_id: string }`
+
+The raw HTTP verification path is deliberate: using the SDK verification helper would save the returned session and notify auth subscribers, replacing the current session during transaction verification. The endpoint authenticates via the `apikey` header only (anon key) — the challenge itself is bound to the user's session, providing user context. Neither a user JWT nor a service role key should be sent in the `Authorization` header, as GoTrue rejects unexpected auth headers with 403. The `X-Supabase-Api-Version` header must match the SDK's expected version.
+
+---
+
+### `passkey-manage`
+
+**Purpose**: List, rename, delete, and authorize registration of Passkeys.
+
+**Auth**: Required JWT for every action.
+
+**Actions**:
+- `list` — list the authenticated user's credentials through the GoTrue admin API
+- `rename` — update a credential's cosmetic friendly name
+- `delete` — consume fresh `user_transaction` or `admin_financial` verification and enforce 2FA invariant via `_authorize_factor_removal`
+- `authorize-enrollment` — consume a `passkey_enrollment` verification token and create a five-minute enrollment authorization
+- `signup-authorize` — create a two-minute first-factor authorization for a new account with no existing factors
+- `mandatory-authorize` — create a five-minute authorization for a legacy account with no existing factors; after successful mandatory Passkey registration, establishes login assurance via `establish_login_assurance_direct(p_session_id, p_user_id)`
+
+Passkey registration itself remains a Supabase Auth/WebAuthn operation. The Edge Function creates the server-side authorization that the `auth.webauthn_credentials` insert trigger requires.
+
+**Caller identity requirement**: `_consume_verification_token()` validates ownership through `auth.uid()`. Calls from this Edge Function must therefore preserve the authenticated user's JWT context when invoking that RPC; service-role table privileges alone do not provide the user's identity. The `delete` action creates a user-JWT client (same pattern as `authorize-enrollment`) for token consumption and invariant enforcement.
+
+**2FA invariant enforcement (Phase 28)**: The `delete` action calls `_authorize_factor_removal('passkey', passkeyCount)` after listing passkeys. This uses a transaction-level advisory lock to serialize concurrent factor-removal operations. After successful GoTrue deletion, the receipt is cleaned up via `_cleanup_factor_removal_receipt('passkey')`.
 
 ---
 
 ### `disable-2fa`
 
-**Purpose**: Disable 2FA after verifying a valid TOTP code.
+**Purpose**: Disable the Authenticator after either direct TOTP verification or a fresh verification token, while preserving the 2FA invariant (at least one Passkey must remain).
 
 **Endpoint**: `POST /functions/v1/disable-2fa`
 
 **Auth**: Required (JWT)
 
-**Request body**: `{ code: string }` (6-digit TOTP code)
+**Request body**: `{ code: string }` or `{ verification_id: string, required_scope?: "user_transaction" | "admin_financial" }`
 
 **Process**:
 1. Authenticate user
-2. Validate code format (6 digits)
-3. Read enabled `user_2fa` record
-4. Decrypt secret, verify TOTP code
-5. If invalid: increment `failed_attempts`, audit log `2FA_DISABLE_FAILED`, reject
-6. Set `enabled=false` on `user_2fa`
-7. Delete all recovery codes
-8. Delete all active verification tokens
-9. Audit log: `2FA_DISABLED`
+2. Require either a TOTP code or `verification_id`
+3. For a verification token, validate its allowed scope and consume it atomically (via user-JWT client)
+4. For a TOTP code, validate format and verify it against the enabled encrypted secret
+5. List passkeys via GoTrue admin API (`/auth/v1/admin/users/...`)
+6. Call `_authorize_factor_removal('totp', passkeyCount)` to enforce the 2FA invariant
+7. Set `enabled=false` on `user_2fa`
+8. Delete recovery codes and active verification tokens
+9. Insert audit log: `2FA_DISABLED`
 
 **Response**: `{ success: true }`
+
+**Phase 28 fixes applied**:
+1. **GoTrue URL corrected**: Passkey-list fetch now uses `${supabaseUrl}/auth/v1/admin/users/...` (was missing `/auth/v1` prefix)
+2. **User-JWT token consumption**: `_consume_verification_token` is now called via a user-JWT client (not service-role), preserving `auth.uid()` identity context
+3. **Invariant enforcement**: Manual passkey count check replaced with `_authorize_factor_removal('totp', passkeyCount)` for race-safe enforcement
 
 ---
 
@@ -232,8 +286,10 @@ catch (err) {
 |---|---|
 | 400 | Bad request (invalid code, 2FA not enabled, etc.) |
 | 401 | Unauthorized (missing/invalid JWT) |
-| 404 | Not found (2FA record missing, deposit not found) |
+| 403 | Forbidden (authorization or credential ownership rejected) |
+| 404 | Not found (2FA record, profile, credential, or deposit missing) |
 | 405 | Method not allowed (non-POST requests) |
+| 409 | Conflict (last-factor protection) |
 | 429 | Rate limited (too many failed attempts) |
 | 500 | Internal server error |
 

@@ -2,6 +2,7 @@ import {
   authenticator,
   CORS,
   decryptSecret,
+  extractSessionId,
   readJson,
   serviceClient,
   sha256,
@@ -94,6 +95,16 @@ Deno.serve(async (req) => {
       target_type: "user_2fa",
       metadata: { user_id: userId },
     });
+
+    // ── Establish login assurance after successful enrollment ──
+    // The enrollment itself is the proof — no verification token consumed.
+    const sessionId = extractSessionId(req);
+    if (sessionId) {
+      await supabase.rpc("establish_login_assurance_direct", {
+        p_session_id: sessionId,
+        p_user_id: userId,
+      });
+    }
 
     return CORS.json({ success: true, recovery_codes: codes });
   } catch (err) {

@@ -158,3 +158,27 @@ export async function readJson(req: Request): Promise<Record<string, unknown>> {
     return {};
   }
 }
+
+// -----------------------------------------------------------------------------
+// Extract session_id from a Supabase JWT (Authorization header)
+// -----------------------------------------------------------------------------
+// Supabase JWTs contain a stable session_id claim that persists across
+// access-token refreshes within the same browser session.  This helper
+// decodes the payload WITHOUT cryptographic verification — the Edge
+// Function has already validated the JWT via verifyAuth().
+
+export function extractSessionId(req: Request): string | null {
+  const authHeader = req.headers.get("authorization");
+  if (!authHeader) return null;
+
+  const token = authHeader.replace(/^Bearer\s+/i, "");
+  const parts = token.split(".");
+  if (parts.length !== 3) return null;
+
+  try {
+    const payload = JSON.parse(atob(parts[1]));
+    return typeof payload.session_id === "string" ? payload.session_id : null;
+  } catch {
+    return null;
+  }
+}

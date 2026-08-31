@@ -1,0 +1,19 @@
+[auth]
+site_url = "https://xreserve.up.railway.app"
+additional_redirect_urls = ["http://localhost:3000", "https://xreserve.up.railway.app"]
+
+[auth.passkey]
+enabled = true
+
+[auth.webauthn]
+rp_display_name = "XReserve"
+rp_id = "xreserve.up.railway.app"
+rp_origins = ["https://xreserve.up.railway.app"]
+
+[auth.mfa.totp]
+enroll_enabled = true
+verify_enabled = true
+
+[auth.email]
+max_frequency = "1m0s"
+otp_length = 8

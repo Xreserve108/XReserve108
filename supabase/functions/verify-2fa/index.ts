@@ -2,6 +2,7 @@ import {
   authenticator,
   CORS,
   decryptSecret,
+  extractSessionId,
   readJson,
   serviceClient,
   sha256,
@@ -23,7 +24,7 @@ Deno.serve(async (req) => {
     if (!code) return CORS.error("Code is required", 400);
 
     // Validate scope if provided
-    const validScopes = ["user_transaction", "admin_financial", "admin_settings"];
+    const validScopes = ["user_transaction", "admin_financial", "admin_settings", "passkey_enrollment", "login"];
     if (scope && !validScopes.includes(scope)) {
       return CORS.error("Invalid operation scope", 400);
     }
@@ -103,6 +104,18 @@ Deno.serve(async (req) => {
             metadata: { user_id: userId, scope: scope || null },
           });
 
+          // ── Login assurance (recovery-code path) ──
+          if (scope === "login") {
+            const sessionId = extractSessionId(req);
+            if (sessionId) {
+              await supabase.rpc("establish_login_assurance", {
+                p_session_id: sessionId,
+                p_verification_token: verRow.id,
+                p_user_id: userId,
+              });
+            }
+          }
+
           return CORS.json({ verification_id: verRow.id });
         }
       }
@@ -171,6 +184,18 @@ Deno.serve(async (req) => {
       target_type: "user_2fa",
       metadata: { user_id: userId, verification_id: verRow.id, scope: scope || null },
     });
+
+    // ── Login assurance (TOTP path) ──
+    if (scope === "login") {
+      const sessionId = extractSessionId(req);
+      if (sessionId) {
+        await supabase.rpc("establish_login_assurance", {
+          p_session_id: sessionId,
+          p_verification_token: verRow.id,
+          p_user_id: userId,
+        });
+      }
+    }
 
     return CORS.json({ verification_id: verRow.id });
   } catch (err) {

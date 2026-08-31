@@ -28,16 +28,16 @@
 │  │  Supabase    │  │  PostgreSQL      │  │  Edge Functions │  │
 │  │  Auth        │  │  (RPC Functions) │  │  (Deno)         │  │
 │  │              │  │                  │  │                 │  │
-│  │  - Google    │  │  - Wallet ops    │  │  - enroll-2fa   │  │
-│  │    OAuth     │  │  - Admin ops     │  │  - verify-2fa   │  │
-│  │  - JWT       │  │  - 2FA status    │  │  - verify-2fa-  │  │
-│  │  - Sessions  │  │  - Deposit mgmt  │  │    setup        │  │
-│  │              │  │  - Sell orders   │  │  - disable-2fa  │  │
-│  │              │  │  - Audit logs    │  │  - verify-trc20-│  │
-│  │              │  │  - Deposit       │  │    deposit      │  │
-│  │              │  │    methods       │  │                 │  │
-│  │              │  │  - Live chat     │  │                 │  │
-│  │              │  │    support       │  │                 │  │
+│  │  - Username/ │  │  - Wallet ops    │  │  - enroll-2fa   │  │
+│  │    password  │  │  - Admin ops     │  │  - verify-2fa   │  │
+│  │  - Passkeys  │  │  - 2FA status    │  │  - verify-2fa-  │  │
+│  │  - JWT       │  │  - Deposit mgmt  │  │    setup        │  │
+│  │  - Sessions  │  │  - Sell orders   │  │  - disable-2fa  │  │
+│  │              │  │  - Audit logs    │  │  - passkey-     │  │
+│  │              │  │  - Enrollment    │  │    manage       │  │
+│  │              │  │    authorization │  │  - verify-      │  │
+│  │              │  │  - Support       │  │    passkey-     │  │
+│  │              │  │                  │  │    action       │  │
 │  └──────────────┘  └──────────────────┘  └─────────────────┘  │
 │                                                                 │
 │  ┌──────────────────────────────────────────────────────────┐  │
@@ -47,6 +47,8 @@
 │  │  deposits · sell_orders · exchange_settings             │  │
 │  │  deposit_methods · admin_users · audit_logs             │  │
 │  │  user_2fa · recovery_codes · user_2fa_verifications     │  │
+│  │  passkey_enrollment_authorizations · auth WebAuthn data │  │
+│  │  factor_removal_receipts · login_assurance              │  │
 │  │  notifications                                          │  │
 │  │  support_agent_status · support_chat_sessions           │  │
 │  │  support_chat_messages                                  │  │
@@ -98,6 +100,55 @@ User enters USDT amount → Frontend calculates INR payout
     → On complete: reserved USDT consumed, order COMPLETED
     → On reject/cancel: reserved USDT released back to available
 ```
+
+### Authentication and Login Flow
+
+```text
+Username/password submitted
+    → Username normalized and mapped to a synthetic Supabase Auth email
+    → Supabase Auth establishes a JWT session
+    → login2faPending keeps application currentUser unset
+    → Security state detects enabled Authenticator and registered Passkeys
+    → Authenticator-only: non-dismissible TOTP/recovery verification
+    → Passkey-only: Passkey authentication
+    → Both: user chooses Authenticator or Passkey
+    → Neither: restricted mandatory setup for Authenticator or Passkey
+    → Successful 2FA verification establishes server-side login assurance
+      (session-bound record in login_assurance tied to JWT session_id)
+    → completeLogin2FA() checks assurance and populates currentUser
+    → Authenticated application rendered
+    → Failure/cancellation signs the user out
+```
+
+### Transaction Verification Flow
+
+```text
+Protected action requests fresh verification with an operation scope
+    → TotpDialog detects available Authenticator and Passkey methods
+    → Authenticator path calls verify-2fa
+    → Passkey path calls verify-passkey-action without replacing the session
+    → Edge Function returns verification_id
+    → Protected RPC or management Edge Function validates ownership, expiry,
+      single-use state, and exact scope
+    → Verification token is atomically consumed
+    → Protected action continues
+```
+
+### Passkey Enrollment Flow
+
+```text
+Existing user clicks Add Passkey
+    → Fresh verification with passkey_enrollment scope
+    → passkey-manage consumes verification token
+    → Short-lived passkey_enrollment_authorizations row created
+    → Supabase Auth starts WebAuthn registration
+    → Browser creates credential
+    → Supabase Auth verifies registration and inserts auth.webauthn_credentials
+    → Database trigger finds and atomically consumes enrollment authorization
+    → Credential accepted
+```
+
+Signup users use the age-limited `signup-authorize` path. Legacy users with no configured factor use the restricted `mandatory-authorize` path. Both still require a server-created enrollment authorization before credential insertion.
 
 ### 2FA Enrollment Flow
 
@@ -167,20 +218,18 @@ Admin navigates to Live Chat Center
 
 ```
 main.js
-  ├── initTheme()          — Apply saved/system theme preference
-  ├── initLenis()          — Start smooth scrolling (respects reduced-motion)
-  ├── Show loading spinner
-  ├── initAuth()           — Resolve initial Supabase session
-  ├── Check 2FA status     — If enabled, show TotpDialog at login
-  │   ├── Success → continue
-  │   ── Fail/cancel → signOut(), redirect to signin
-  ├── isAdmin()            — Check admin status, cache result
-  ├── setupAuthListener()  — Subscribe to auth state changes
-  ├── initApp()
-  │   ├── onLayoutChange() — Register layout switch handler
-  │   ├── registerRoutes() — Register all user + admin routes
-  │   ── initRouter()     — Start hash-based routing
-  └── Redirect admin → admin dashboard
+  ├── initTheme()          — Apply saved theme preference
+  ├── initLenis()          — Start smooth scrolling
+  ├── initApp()            — Build shell and register routes
+  ├── setupAuthListener()  — Subscribe to application auth events
+  ├── initAuth()           — Wait for initial Supabase auth event
+  ├── getSession()         — Restore the persisted Supabase session
+  ├── openAuthGate()       — Check server-side login assurance, populate currentUser
+  ├── initRouter()         — Start hash-based routing after auth state is ready
+  ├── isAdmin()            — Check and cache admin status
+  └── Start authenticated wallet/chat/admin heartbeat services as applicable
+
+Interactive username/password login uses a separate pending-auth flow in `signin.js`: `login2faPending` remains true until Authenticator/Passkey verification or mandatory setup succeeds. Restored-session bootstrap checks login assurance via `check_login_assurance` RPC — sessions without valid assurance are signed out.
 
 Note: Page render functions (home, wallet, orders) are async.
 The router's renderPage() awaits route.render() before appending to DOM.
@@ -256,6 +305,23 @@ The app has two distinct layouts that are swapped dynamically by the router:
 | `021_pre_reconstruction_cleanup.sql` | Phase 21 | Pre-reconstruction cleanup |
 | `022_live_support_chat.sql` | Phase 22 | Live support chat (agent status, sessions, messages, RLS, Realtime, 16 RPCs) |
 | `023_agent_heartbeat_race_hardening.sql` | Phase 23 | Agent heartbeat, stale-agent filtering, duplicate active-chat protection |
+| `024_support_tickets.sql` | Support tickets | Ticket tables, messages, internal notes, RLS, and RPCs |
+| `025_phase2_ticket_security_hardening.sql` | Ticket hardening | Tightens ticket permissions and authorization |
+| `026_ticket_ux_fixes.sql` | Ticket fixes | Ticket workflow and UX-supporting database corrections |
+| `027_fix_live_chat_return_functions.sql` | Chat fix | Corrects live-chat return functions |
+| `028_end_chat_purge_history.sql` | Chat lifecycle | Purges ended live-chat history as designed |
+| `029_stale_session_recovery.sql` | Chat recovery | Recovers stale support sessions |
+| `030_chat_session_presence_heartbeat.sql` | Chat presence | Session presence heartbeat support |
+| `031_fix_chat_rpc_ambiguity_and_type.sql` | Chat fix | Resolves RPC ambiguity and return types |
+| `032_admin_users_management.sql` | Admin users | Admin user-management RPCs and controls |
+| `033_fix_admin_list_users_ambiguity.sql` | Admin users fix | Resolves list-users ambiguity |
+| `034_add_is_admin_to_list_users.sql` | Admin users | Adds admin state to user-list results |
+| `035_passkey_2fa_support.sql` | Passkey 2FA | Passkey verification tokens and challenge replay protection |
+| `036_phase_20_passkey_enrollment_authorization.sql` | Passkey enrollment | Server-side, short-lived enrollment authorization and credential trigger |
+| `039_phase_22_login_assurance.sql` | Login assurance | Session-bound 2FA proof (`login_assurance` table, assurance RPCs) |
+| `040_phase_23_assurance_user_context.sql` | Assurance fix | Adds `p_user_id` parameter for service-role Edge Function context |
+| `041_phase_23c_resolve_assurance_overloads.sql` | Overload resolution | Drops all old overloads from M039/M040; re-creates single signatures with `DEFAULT NULL` for `p_user_id` |
+| `042_phase_28_2fa_invariant_enforcement.sql` | 2FA invariant | `factor_removal_receipts` table, `_authorize_factor_removal` RPC, `_cleanup_factor_removal_receipt` RPC |
 
 ## Environment Variables
 

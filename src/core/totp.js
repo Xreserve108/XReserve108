@@ -46,6 +46,20 @@ export async function disable2FA(code) {
   return callEdgeFunction('disable-2fa', { code });
 }
 
+// --- Disable 2FA with verification_id (passkey-authenticated) ---
+
+/**
+ * Disable TOTP using a verification_id from passkey/TOTP verification.
+ * @param {string} verificationId
+ * @param {string} [requiredScope] - Scope the token was created with (default: 'user_transaction')
+ */
+export async function disable2FAWithVerification(verificationId, requiredScope) {
+  return callEdgeFunction('disable-2fa', {
+    verification_id: verificationId,
+    required_scope: requiredScope || undefined,
+  });
+}
+
 // --- Verify TOTP code → get verification_id (Edge Function) ---
 
 export async function verify2FACode(code, scope) {

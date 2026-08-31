@@ -1,6 +1,6 @@
 # Database Schema
 
-All database objects live in PostgreSQL via Supabase. The schema is managed through 24 sequential migration files in `supabase/migrations/`.
+All database objects live in PostgreSQL via Supabase. The schema is managed through sequential migration files in `supabase/migrations/`, currently through migration 042.
 
 ---
 
@@ -12,9 +12,9 @@ User profiles, auto-created on signup via trigger.
 | Column | Type | Notes |
 |---|---|---|
 | `id` | UUID PK | References `auth.users(id)` ON DELETE CASCADE |
-| `full_name` | TEXT | From Google OAuth metadata |
-| `avatar_url` | TEXT | From Google OAuth metadata |
-| `email` | TEXT | User email |
+| `full_name` | TEXT | From username signup metadata; user-editable profile name |
+| `avatar_url` | TEXT | Optional profile avatar |
+| `email` | TEXT | Internal Supabase Auth identity; username accounts use a synthetic address |
 | `username` | TEXT | UNIQUE, case-insensitive login identifier (Phase 10A) |
 | `created_at` | TIMESTAMPTZ | Auto |
 | `updated_at` | TIMESTAMPTZ | Auto-updated via trigger |
@@ -184,13 +184,13 @@ Tracks which users have admin privileges (hardened in Phase 11).
 | Column | Type | Notes |
 |---|---|---|
 | `user_id` | UUID PK FK | References `auth.users(id)` |
-| `role` | TEXT | `admin` or `super_admin` |
+| `role` | TEXT | `super_admin` (only valid value; CHECK constraint since Migration 008) |
 | `is_active` | BOOLEAN | Default `true` |
 | `created_by` | UUID FK | References `auth.users(id)` |
 | `created_at` | TIMESTAMPTZ | Auto |
 | `updated_at` | TIMESTAMPTZ | Auto |
 
-**RLS**: Active admin can SELECT own row. Only `super_admin` can UPDATE.
+**RLS**: Active admin can SELECT own row. No UPDATE policy (original policy dropped in Migrations 008/021; admin management via `add_admin` RPC only).
 
 ---
 
@@ -286,7 +286,7 @@ One-time recovery codes for 2FA fallback.
 ---
 
 ### `user_2fa_verifications`
-Single-use verification tokens issued after TOTP verification.
+Single-use verification tokens issued after successful Authenticator or Passkey action verification.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -295,10 +295,65 @@ Single-use verification tokens issued after TOTP verification.
 | `verified_at` | TIMESTAMPTZ | Auto |
 | `expires_at` | TIMESTAMPTZ | Typically 5 minutes after creation |
 | `used` | BOOLEAN | Default `false` |
-| `operation_scope` | TEXT | e.g., `user_transaction`, `admin_financial` |
-| `used_at` | TIMESTAMPTZ | When consumed (Phase 12A fix) |
+| `operation_scope` | TEXT | `user_transaction`, `admin_financial`, `admin_settings`, or `passkey_enrollment` |
+| `used_at` | TIMESTAMPTZ | When atomically consumed |
+| `source_challenge_id` | UUID | Passkey challenge identifier; nullable for TOTP, uniquely indexed when present |
 
-**Access**: All client roles revoked.
+**Consumption rules**: `_consume_verification_token(p_token_id, p_required_scope)` locks the row, requires `auth.uid()` ownership, rejects expired/used tokens, enforces exact scope matching, and marks the token used in the same transaction.
+
+**Access**: Client access is revoked; tokens are created by security Edge Functions and consumed by internal database helpers.
+
+---
+
+### `passkey_enrollment_authorizations`
+Short-lived server-side authorization for inserts into `auth.webauthn_credentials`.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | UUID PK | `gen_random_uuid()` |
+| `user_id` | UUID FK | References `auth.users(id)` ON DELETE CASCADE |
+| `created_at` | TIMESTAMPTZ | Auto |
+| `expires_at` | TIMESTAMPTZ | Two-minute signup or five-minute existing/legacy window |
+| `consumed_at` | TIMESTAMPTZ | Set atomically by the credential insert trigger |
+| `verification_method` | TEXT | `totp`, `passkey`, or `signup` |
+| `is_signup` | BOOLEAN | Marks signup/mandatory first-factor authorization |
+
+**Access**: RLS enabled with no client policies. `service_role` may insert; `supabase_auth_admin` may select and update only `consumed_at` for trigger execution.
+
+---
+
+### `factor_removal_receipts` (Phase 28)
+Short-lived receipts bridging cross-system factor removal (PostgreSQL TOTP + GoTrue passkeys). Used by `_authorize_factor_removal` to enforce the 2FA invariant under concurrent requests.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | UUID PK | `gen_random_uuid()` |
+| `user_id` | UUID FK | References `auth.users(id)` ON DELETE CASCADE |
+| `factor_type` | TEXT | `passkey` or `totp` (CHECK constraint) |
+| `passkeys_remaining` | INTEGER NULL | For passkey deletion: count after deletion; NULL for TOTP |
+| `completed` | BOOLEAN | Default false; set true after GoTrue operation |
+| `created_at` | TIMESTAMPTZ | Auto; 10-minute TTL for expiration |
+
+**Access**: RLS enabled. All client roles (`anon`, `authenticated`, `public`) explicitly revoked. Only `postgres` and `service_role` retain grants. All access is through `SECURITY DEFINER` RPCs (`_authorize_factor_removal`, `_cleanup_factor_removal_receipt`).
+
+---
+
+### `login_assurance`
+Session-bound records proving 2FA completion for a specific browser session (Phase 22/23).
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | UUID PK | `gen_random_uuid()` |
+| `user_id` | UUID FK | References `auth.users(id)` ON DELETE CASCADE |
+| `session_id` | TEXT | Supabase JWT `session_id` claim |
+| `created_at` | TIMESTAMPTZ | Auto |
+
+**Indexes**: Unique on `(user_id, session_id)` — at most one assurance per user per session.
+
+**Access**: All client roles revoked from INSERT/UPDATE/DELETE. Authenticated users can SELECT via `check_login_assurance` RPC (SECURITY DEFINER). Written by `establish_login_assurance` and `establish_login_assurance_direct` (SECURITY DEFINER).
+
+### `auth.webauthn_credentials`
+Supabase Auth owns the Passkey credential table. XReserve does not redefine its schema. Migration 036 adds an `AFTER INSERT` trigger requiring an active enrollment authorization for `NEW.user_id`.
 
 ---
 
@@ -386,6 +441,15 @@ Individual messages within chat sessions (Phase 22).
 | `mark_all_notifications_read()` | Mark all user notifications as read | No (auth required) |
 | `get_unread_notification_count()` | Get count of unread notifications | No (auth required) |
 
+### Login Assurance
+
+| Function | Purpose | Auth |
+|---|---|---|
+| `establish_login_assurance(p_session_id, p_verification_token DEFAULT NULL, p_user_id DEFAULT NULL)` | Consume verification token and create session-bound assurance record. Single signature (Migration 041 resolved overloads). `p_user_id` required from service-role Edge Functions; defaults to `auth.uid()` when NULL. | SECURITY DEFINER |
+| `establish_login_assurance_direct(p_session_id, p_user_id DEFAULT NULL)` | Create assurance without token consumption (enrollment/Passkey paths). Single signature (Migration 041 resolved overloads). `p_user_id` required from service-role Edge Functions; defaults to `auth.uid()` when NULL. | SECURITY DEFINER |
+| `check_login_assurance(p_session_id)` | Verify valid assurance exists for the session | Authenticated (called from frontend) |
+| `revoke_login_assurance()` | Remove current user's assurance records | Authenticated |
+
 ### Live Support Chat (authenticated users)
 
 | Function | Purpose | Admin Only |
@@ -435,9 +499,14 @@ Individual messages within chat sessions (Phase 22).
 
 | Function | Purpose |
 |---|---|
-| `_require_2fa_verification(verification_id, scope)` | Validate and consume a verification token |
-| `_require_2fa_enabled()` | Check 2FA is enabled (no token needed) |
-| `_require_admin_2fa(verification_id, scope)` | Admin check + 2FA token validation |
+| `_create_verification_token(user_id, scope, expires, source_challenge_id)` | Create a scoped token; Passkey challenges are recorded for replay prevention |
+| `_consume_verification_token(token_id, required_scope)` | Atomically validate ownership, expiry, single-use state, and exact scope, then consume the token |
+| `_require_2fa_verification(verification_id, scope)` | Validate and consume a token produced by either Authenticator or Passkey verification |
+| `_require_2fa_enabled()` | Check whether the Authenticator is enabled (no token needed) |
+| `_require_admin_2fa(verification_id, scope)` | Admin check plus scoped token validation |
+| `_authorize_factor_removal(factor_type, current_passkey_count)` | Atomic 2FA invariant check with advisory lock; creates receipt for passkey deletion (Phase 28) |
+| `_cleanup_factor_removal_receipt(factor_type)` | Delete most recent uncompleted receipt after successful GoTrue operation (Phase 28) |
+| `_check_passkey_enrollment_auth()` | Trigger helper that atomically consumes a valid enrollment authorization |
 | `handle_new_user()` | Trigger: auto-create profile + wallet + balance + notify admins on signup |
 | `set_updated_at()` | Trigger: auto-update `updated_at` column |
 | `block_ledger_mutation()` | Trigger: prevent UPDATE/DELETE on ledger_entries |
@@ -467,6 +536,7 @@ Individual messages within chat sessions (Phase 22).
 | `trg_block_ledger_mutation` | `ledger_entries` | BEFORE UPDATE OR DELETE | `block_ledger_mutation()` — raises exception |
 | `trg_support_chat_updated` | `support_chat_sessions` | BEFORE UPDATE | `_support_chat_updated_trigger()` — auto-updates `updated_at` |
 | `trg_support_ticket_updated` | `support_tickets` | BEFORE UPDATE | `set_updated_at()` |
+| `check_passkey_enrollment_auth` | `auth.webauthn_credentials` | AFTER INSERT | `_check_passkey_enrollment_auth()` — requires and consumes server enrollment authorization |
 
 ---
 
@@ -554,11 +624,11 @@ Admin-only notes invisible to users.
 
 ## Auto-Provision Flow
 
-When a new user signs up (via Google OAuth), the `handle_new_user()` trigger fires:
+When a new user signs up through username/password authentication, the `handle_new_user()` trigger fires:
 
 ```
 auth.users INSERT
-  → profiles (id, full_name, avatar_url, email, username)
+  → profiles (id, full_name, synthetic email, immutable display username)
   → wallets (user_id)
   → wallet_balances (wallet_id, available_usdt=0, reserved_usdt=0)
   → notifications (admin notification: new_user_signup)

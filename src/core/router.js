@@ -1,10 +1,29 @@
 import { isAuthenticated, isAdmin, is2FAVerified } from '@/core/auth';
 import { get2FAStatus } from '@/core/totp';
+import { browserSupportsPasskeys, listPasskeys } from '@/core/passkey';
 import { notifyRouteChange } from '@/lib/chat';
 
 const routes = {};
 let currentRoute = null;
 let layoutHandler = null;
+
+/**
+ * Check if user has ANY 2FA method (TOTP or passkey).
+ * Used for admin route guards.
+ */
+async function hasAny2FA() {
+  try {
+    const status = await get2FAStatus();
+    if (status.enabled) return true;
+  } catch { /* ignore */ }
+  if (browserSupportsPasskeys()) {
+    try {
+      const passkeys = await listPasskeys();
+      if (passkeys.length > 0) return true;
+    } catch { /* ignore */ }
+  }
+  return false;
+}
 
 export function registerRoute(name, config) {
   routes[name] = config;
@@ -36,8 +55,8 @@ export function navigate(routeName) {
         return;
       }
       // Mandatory admin 2FA: block all admin routes without 2FA
-      const status = await get2FAStatus();
-      if (!status.enabled) {
+      const has2fa = await hasAny2FA();
+      if (!has2fa) {
         currentRoute = 'security';
         window.location.hash = 'security';
         render();
@@ -106,8 +125,8 @@ function render() {
         return;
       }
       // Mandatory admin 2FA: block all admin routes without 2FA
-      const status = await get2FAStatus();
-      if (!status.enabled) {
+      const has2fa = await hasAny2FA();
+      if (!has2fa) {
         currentRoute = 'security';
         window.location.hash = 'security';
         render();
@@ -196,8 +215,8 @@ export function initRouter() {
         isAdmin().then(async (isAdm) => {
           if (isAdm) {
             // Mandatory admin 2FA enforcement
-            const status = await get2FAStatus();
-            if (!status.enabled) {
+            const has2fa = await hasAny2FA();
+            if (!has2fa) {
               currentRoute = 'security';
               window.location.hash = 'security';
               render();
@@ -246,8 +265,8 @@ export function initRouter() {
         const isAdm = await isAdmin();
         if (isAdm) {
           // Mandatory admin 2FA enforcement
-          const status = await get2FAStatus();
-          if (!status.enabled) {
+          const has2fa = await hasAny2FA();
+          if (!has2fa) {
             currentRoute = 'security';
           } else {
             currentRoute = rawInitial;

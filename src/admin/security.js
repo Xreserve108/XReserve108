@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/supabase';
-import { get2FAStatus, begin2FAEnrollment, confirm2FAEnrollment, disable2FA, renderQRCode } from '@/core/totp';
+import { get2FAStatus, begin2FAEnrollment, confirm2FAEnrollment, disable2FAWithVerification, renderQRCode } from '@/core/totp';
 import { requireVerification } from '@/components/TotpDialog';
+import { listPasskeys, deletePasskey, renamePasskey, browserSupportsPasskeys, registerPasskeyExisting } from '@/core/passkey';
 
 export function renderAdminSecurity() {
   const page = document.createElement('main');
@@ -36,63 +37,215 @@ async function loadAdminSecurity(page) {
   const container = page.querySelector('#admin-security-content');
   try {
     const status = await get2FAStatus();
-    container.className = '';
-    if (status.enabled) {
-      renderAdminEnabled(container, status);
-    } else {
-      renderAdminDisabled(container);
+
+    // Load passkeys
+    let passkeys = [];
+    if (browserSupportsPasskeys()) {
+      try {
+        passkeys = await listPasskeys();
+      } catch { /* ignore */ }
     }
+
+    container.className = '';
+    buildAdminSecurityHTML(container, status, passkeys);
   } catch (err) {
     container.innerHTML = `<div class="card p-6 text-center"><p class="text-[14px] text-red-600 dark:text-red-400">${err.message || 'Failed to load'}</p></div>`;
   }
 }
 
-function renderAdminEnabled(container, status) {
+function buildAdminSecurityHTML(container, status, passkeys) {
+  const hasTotp = status.enabled;
+  const hasPasskey = passkeys.length > 0;
+
   container.innerHTML = `
+    <!-- Authenticator Section -->
     <div class="card p-6 mb-4 max-w-lg">
       <div class="flex items-center gap-3 mb-4">
-        <div class="flex h-10 w-10 items-center justify-center rounded-full bg-green-500/10 dark:bg-green-500/20">
-          <svg class="h-5 w-5 text-green-600 dark:text-green-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"/></svg>
+        <div class="flex h-10 w-10 items-center justify-center rounded-full ${hasTotp ? 'bg-green-500/10 dark:bg-green-500/20' : 'bg-amber-500/10 dark:bg-amber-500/20'}">
+          ${hasTotp
+            ? '<svg class="h-5 w-5 text-green-600 dark:text-green-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"/></svg>'
+            : '<svg class="h-5 w-5 text-amber-600 dark:text-amber-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>'
+          }
         </div>
         <div>
-          <p class="text-[15px] font-semibold text-text-primary dark:text-text-primary-dark">2FA Enabled</p>
-          <p class="text-[12px] text-text-secondary dark:text-text-secondary-dark">Since ${new Date(status.created_at).toLocaleDateString()}</p>
+          <p class="text-[15px] font-semibold text-text-primary dark:text-text-primary-dark">Authenticator${hasTotp ? ' Enabled' : ' Not Enabled'}</p>
+          ${hasTotp ? `<p class="text-[12px] text-text-secondary dark:text-text-secondary-dark">Since ${new Date(status.created_at).toLocaleDateString()}</p>` : ''}
         </div>
       </div>
-      <p class="text-[13px] text-text-secondary dark:text-text-secondary-dark">Admin operations require fresh TOTP verification.</p>
+      ${hasTotp
+        ? `<p class="text-[13px] text-text-secondary dark:text-text-secondary-dark mb-4">Admin operations require fresh verification.</p>
+           ${!hasPasskey
+             ? '<p class="text-[12px] text-amber-600 dark:text-amber-400 mb-3">Add a passkey before disabling authenticator. Your account must always have at least one 2FA method.</p>'
+             : ''}
+           <button id="admin-disable-totp" class="btn-secondary w-full text-red-600 dark:text-red-400${!hasPasskey ? ' opacity-50 cursor-not-allowed' : ''}"${!hasPasskey ? ' disabled' : ''}>Disable Authenticator</button>`
+        : `<p class="text-[13px] text-text-secondary dark:text-text-secondary-dark mb-4">Set up an authenticator app for admin two-factor authentication.</p>
+           <button id="admin-enable-totp" class="btn-primary w-full">Set Up Authenticator</button>`
+      }
     </div>
-    <div class="max-w-lg space-y-3">
-      <button id="admin-disable-2fa" class="btn-secondary w-full text-red-600 dark:text-red-400">Disable 2FA</button>
+
+    <!-- Passkey Section -->
+    <div class="card p-6 mb-4 max-w-lg">
+      <div class="flex items-center gap-3 mb-4">
+        <div class="flex h-10 w-10 items-center justify-center rounded-full ${hasPasskey ? 'bg-green-500/10 dark:bg-green-500/20' : 'bg-black/[0.04] dark:bg-white/[0.06]'}">
+          <svg class="h-5 w-5 ${hasPasskey ? 'text-green-600 dark:text-green-400' : 'text-text-secondary dark:text-text-secondary-dark'}" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25c2.25-1.5 3-3.75 3-5.25m3.75 0v-3m-3.75 3V12"/></svg>
+        </div>
+        <div>
+          <p class="text-[15px] font-semibold text-text-primary dark:text-text-primary-dark">Passkey${hasPasskey ? ` (${passkeys.length})` : ''}</p>
+        </div>
+      </div>
+      ${hasPasskey
+        ? `<div id="admin-passkey-list" class="space-y-2 mb-4">${renderAdminPasskeyList(passkeys, hasTotp || passkeys.length > 1)}</div>
+           ${!hasTotp && passkeys.length === 1 ? '<p class="text-[12px] text-amber-600 dark:text-amber-400 mb-3">Enable authenticator before deleting your last passkey. Your account must always have at least one 2FA method.</p>' : ''}
+           <div id="admin-passkey-feedback" class="hidden mt-3"></div>`
+        : `<div id="admin-passkey-feedback" class="hidden mt-3"></div>`
+      }
+      <button id="admin-add-passkey-btn" class="btn-secondary w-full flex items-center justify-center gap-2">
+        <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+        <span>Add Passkey</span>
+      </button>
     </div>
+
     <div id="admin-security-feedback" class="hidden mt-4 max-w-lg"></div>
     ${changePasswordCard()}
   `;
 
-  container.querySelector('#admin-disable-2fa').addEventListener('click', () => handleAdminDisable(container));
+  // ── Event handlers ──
+  const enableTotpBtn = container.querySelector('#admin-enable-totp');
+  if (enableTotpBtn) enableTotpBtn.addEventListener('click', () => handleAdminEnroll(container));
+
+  const disableTotpBtn = container.querySelector('#admin-disable-totp');
+  if (disableTotpBtn) disableTotpBtn.addEventListener('click', () => handleAdminDisableTotp(container));
+
+  // Passkey handlers
+  const addPasskeyBtn = container.querySelector('#admin-add-passkey-btn');
+  if (addPasskeyBtn) addPasskeyBtn.addEventListener('click', () => handleAdminAddPasskey(container));
+
+  container.querySelectorAll('[data-passkey-delete]').forEach(btn => {
+    btn.addEventListener('click', () => handleAdminDeletePasskey(container, btn.dataset.passkeyDelete));
+  });
+  container.querySelectorAll('[data-passkey-rename]').forEach(btn => {
+    btn.addEventListener('click', () => handleAdminRenamePasskey(container, btn.dataset.passkeyRename, btn.dataset.passkeyName));
+  });
+
   attachChangePasswordHandlers(container);
 }
 
-function renderAdminDisabled(container) {
-  container.innerHTML = `
-    <div class="card p-6 mb-4 max-w-lg">
-      <div class="flex items-center gap-3 mb-4">
-        <div class="flex h-10 w-10 items-center justify-center rounded-full bg-amber-500/10 dark:bg-amber-500/20">
-          <svg class="h-5 w-5 text-amber-600 dark:text-amber-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>
-        </div>
-        <div>
-          <p class="text-[15px] font-semibold text-text-primary dark:text-text-primary-dark">2FA Required</p>
-          <p class="text-[12px] text-text-secondary dark:text-text-secondary-dark">Admins must have 2FA enabled</p>
+function renderAdminPasskeyList(passkeys, canDelete) {
+  return passkeys.map(pk => `
+    <div class="flex items-center justify-between rounded-xl bg-black/[0.03] dark:bg-white/[0.04] px-4 py-3">
+      <div class="flex items-center gap-3 min-w-0">
+        <svg class="h-5 w-5 shrink-0 text-text-secondary dark:text-text-secondary-dark" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25c2.25-1.5 3-3.75 3-5.25m3.75 0v-3m-3.75 3V12"/></svg>
+        <div class="min-w-0">
+          <p class="text-[13px] font-medium text-text-primary dark:text-text-primary-dark truncate">${pk.friendly_name || 'Passkey'}</p>
+          <p class="text-[11px] text-text-secondary dark:text-text-secondary-dark">${new Date(pk.created_at).toLocaleDateString()}</p>
         </div>
       </div>
-      <p class="text-[13px] text-text-secondary dark:text-text-secondary-dark mb-4">Set up 2FA to perform admin operations.</p>
-      <button id="admin-enable-2fa" class="btn-primary w-full">Set Up 2FA</button>
+      <div class="flex items-center gap-2 shrink-0">
+        <button data-passkey-rename="${pk.id}" data-passkey-name="${pk.friendly_name || ''}" class="rounded-lg px-2.5 py-1.5 text-[12px] font-medium text-text-secondary hover:text-text-primary dark:text-text-secondary-dark dark:hover:text-text-primary-dark hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors">Rename</button>
+        <button data-passkey-delete="${pk.id}" class="rounded-lg px-2.5 py-1.5 text-[12px] font-medium text-red-600 dark:text-red-400 hover:bg-red-500/10 transition-colors${!canDelete ? ' opacity-50 cursor-not-allowed' : ''}"${!canDelete ? ' disabled' : ''}>Delete</button>
+      </div>
     </div>
-    <div id="admin-security-feedback" class="hidden mt-4 max-w-lg"></div>
-    ${changePasswordCard()}
-  `;
+  `).join('');
+}
 
-  container.querySelector('#admin-enable-2fa').addEventListener('click', () => handleAdminEnroll(container));
-  attachChangePasswordHandlers(container);
+async function handleAdminDisableTotp(container) {
+  const feedback = container.querySelector('#admin-security-feedback');
+  try {
+    // Use the unified verification dialog (supports both TOTP and passkey)
+    const verificationId = await requireVerification('Disable Authenticator', 'admin_financial');
+    await disable2FAWithVerification(verificationId, 'admin_financial');
+    showFeedback(feedback, 'Authenticator disabled', 'green');
+    setTimeout(() => loadAdminSecurity(container.closest('main') || container.parentElement), 1000);
+  } catch (err) {
+    if (err.message === 'cancelled') return;
+    showFeedback(feedback, err.message || 'Failed to disable authenticator', 'red');
+  }
+}
+
+async function handleAdminAddPasskey(container) {
+  const feedback = container.querySelector('#admin-passkey-feedback') || container.querySelector('#admin-security-feedback');
+  try {
+    // Require fresh TOTP or existing-passkey verification with passkey_enrollment scope
+    const verificationId = await requireVerification('Add Passkey', 'passkey_enrollment');
+
+    // Register new passkey (authorization consumed server-side, trigger validates)
+    await registerPasskeyExisting(verificationId);
+
+    showFeedback(feedback, 'Passkey added successfully', 'green');
+    setTimeout(() => loadAdminSecurity(container.closest('main') || container.parentElement), 1000);
+  } catch (err) {
+    if (err.message === 'cancelled') return;
+    showFeedback(feedback, err.message || 'Failed to add passkey', 'red');
+  }
+}
+
+async function handleAdminDeletePasskey(container, passkeyId) {
+  const feedback = container.querySelector('#admin-passkey-feedback') || container.querySelector('#admin-security-feedback');
+  try {
+    const verificationId = await requireVerification('Delete Passkey', 'admin_financial');
+    await deletePasskey(passkeyId, verificationId, 'admin_financial');
+    showFeedback(feedback, 'Passkey deleted', 'green');
+    setTimeout(() => loadAdminSecurity(container.closest('main') || container.parentElement), 1000);
+  } catch (err) {
+    if (err.message === 'cancelled') return;
+    showFeedback(feedback, err.message || 'Failed to delete passkey', 'red');
+  }
+}
+
+async function handleAdminRenamePasskey(container, passkeyId, currentName) {
+  const feedback = container.querySelector('#admin-passkey-feedback') || container.querySelector('#admin-security-feedback');
+
+  const passkeyList = container.querySelector('#admin-passkey-list');
+  if (!passkeyList) return;
+
+  const existingForm = container.querySelector('#admin-rename-form');
+  if (existingForm) existingForm.remove();
+
+  const form = document.createElement('div');
+  form.id = 'admin-rename-form';
+  form.className = 'card p-4 mb-3';
+  form.innerHTML = `
+    <label class="label" for="admin-rename-input">New name</label>
+    <input type="text" id="admin-rename-input" class="input-field" value="${currentName}" maxlength="120" />
+    <div id="admin-rename-error" class="hidden mt-2 text-[13px] text-red-600 dark:text-red-400"></div>
+    <div class="flex gap-3 mt-3">
+      <button id="admin-rename-cancel" class="btn-secondary flex-1">Cancel</button>
+      <button id="admin-rename-save" class="btn-primary flex-1">Save</button>
+    </div>
+  `;
+  passkeyList.before(form);
+
+  const input = form.querySelector('#admin-rename-input');
+  const saveBtn = form.querySelector('#admin-rename-save');
+  const cancelBtn = form.querySelector('#admin-rename-cancel');
+  const errorEl = form.querySelector('#admin-rename-error');
+
+  input.focus();
+  input.select();
+
+  cancelBtn.addEventListener('click', () => form.remove());
+
+  saveBtn.addEventListener('click', async () => {
+    const newName = input.value.trim();
+    if (!newName) {
+      errorEl.textContent = 'Name cannot be empty';
+      errorEl.classList.remove('hidden');
+      return;
+    }
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Saving...';
+    try {
+      await renamePasskey(passkeyId, newName);
+      form.remove();
+      showFeedback(feedback, 'Passkey renamed', 'green');
+      setTimeout(() => loadAdminSecurity(container.closest('main') || container.parentElement), 800);
+    } catch (err) {
+      errorEl.textContent = err.message || 'Failed to rename';
+      errorEl.classList.remove('hidden');
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Save';
+    }
+  });
 }
 
 async function handleAdminEnroll(container) {
@@ -179,57 +332,6 @@ function showAdminRecoveryCodes(container, codes) {
     const main = container.closest('main');
     if (main) loadAdminSecurity(main);
   });
-}
-
-async function handleAdminDisable(container) {
-  const feedback = container.querySelector('#admin-security-feedback');
-  const btn = container.querySelector('#admin-disable-2fa');
-  btn.disabled = true;
-
-  const inputWrap = document.createElement('div');
-  inputWrap.className = 'mt-3 max-w-lg';
-  inputWrap.innerHTML = `
-    <label class="label" for="admin-disable-code">Enter code to confirm</label>
-    <input type="text" inputmode="numeric" maxlength="6" class="input-field text-center text-[18px] tracking-[0.3em] font-mono" placeholder="000000" id="admin-disable-code" />
-    <div id="admin-disable-error" class="hidden mt-2 text-[13px] text-red-600 dark:text-red-400"></div>
-    <div class="flex gap-3 mt-3">
-      <button id="admin-cancel-disable" class="btn-secondary flex-1">Cancel</button>
-      <button id="admin-confirm-disable" class="btn-secondary flex-1 text-red-600 dark:text-red-400" disabled>Disable</button>
-    </div>
-  `;
-  container.querySelector('.space-y-3, .max-w-lg')?.after(inputWrap) || container.appendChild(inputWrap);
-
-  const input = inputWrap.querySelector('#admin-disable-code');
-  const confirmBtn = inputWrap.querySelector('#admin-confirm-disable');
-  const cancelBtn = inputWrap.querySelector('#admin-cancel-disable');
-  const errorEl = inputWrap.querySelector('#admin-disable-error');
-
-  input.addEventListener('input', () => {
-    errorEl.classList.add('hidden');
-    confirmBtn.disabled = input.value.trim().length < 6;
-  });
-
-  cancelBtn.addEventListener('click', () => {
-    inputWrap.remove();
-    btn.disabled = false;
-  });
-
-  confirmBtn.addEventListener('click', async () => {
-    confirmBtn.disabled = true;
-    try {
-      await disable2FA(input.value.trim());
-      showFeedback(feedback, '2FA disabled', 'green');
-      setTimeout(() => loadAdminSecurity(container.closest('main') || container.parentElement), 1000);
-    } catch (err) {
-      errorEl.textContent = err.message || 'Invalid code';
-      errorEl.classList.remove('hidden');
-      confirmBtn.disabled = false;
-      input.value = '';
-      input.focus();
-    }
-  });
-
-  setTimeout(() => input.focus(), 100);
 }
 
 function changePasswordCard() {

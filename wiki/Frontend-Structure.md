@@ -66,12 +66,16 @@ registerRoute('routeName', {
 ## Core Modules (`src/core/`)
 
 ### `auth.js`
-- `initAuth()` — Resolves initial session from Supabase
-- `signInWithGoogle()` — Google OAuth via Supabase
-- `signOut()` — End session
-- `getUser()` / `isAuthenticated()` — Current user state
-- `isAdmin()` — Checks `admin_users` table via `is_admin_user` RPC (cached)
-- `onAuthStateChange(callback)` — Subscribe to auth events
+- `signUpWithUsername()` / `signInWithUsername()` — username/password through a normalized synthetic Supabase Auth email
+- `initAuth()` — waits for the initial Supabase auth event
+- `currentUser` — application authentication state, separate from the underlying Supabase session
+- `login2faPending` — blocks interactive login from populating `currentUser` before security handling completes
+- `openAuthGate()` — checks server-side login assurance via `check_login_assurance` RPC, populates `currentUser` for restored bootstrap sessions
+- `completeLogin2FA()` — completes interactive login after Authenticator/Passkey verification or mandatory setup; verifies assurance before populating `currentUser`
+- `signOut()` — ends the Supabase session and resets application auth state
+- `isAdmin()` — checks `is_admin_user` and caches the result
+- `onAuthStateChange(callback)` — subscribes to application auth events
+- `TOKEN_REFRESHED` handler re-verifies login assurance asynchronously on every token refresh (defense in depth); signs out if assurance is lost
 
 ### `router.js`
 - `registerRoute(name, config)` — Register a route
@@ -91,9 +95,19 @@ registerRoute('routeName', {
 - `get2FAStatus()` — RPC call to `get_2fa_status`
 - `begin2FAEnrollment()` — Edge Function `enroll-2fa`
 - `confirm2FAEnrollment(code)` — Edge Function `verify-2fa-setup`
-- `disable2FA(code)` — Edge Function `disable-2fa`
-- `verify2FACode(code, scope)` — Edge Function `verify-2fa`, returns `verification_id`
-- `renderQRCode(container, otpauthUri)` — Client-side QR rendering via `qrcode` library
+- `disable2FA(code)` — direct authenticator-code disable path
+- `disable2FAWithVerification(verificationId, requiredScope)` — unified token-based disable path
+- `verify2FACode(code, scope)` — Edge Function `verify-2fa`, returns scoped `verification_id`
+- `renderQRCode(container, otpauthUri)` — client-side QR rendering via `qrcode`
+
+### `passkey.js`
+- Registration paths: signup, mandatory legacy setup, and existing-user enrollment
+- Existing-user registration requires a `passkey_enrollment` verification token before WebAuthn begins
+- Uses Supabase Auth two-step Passkey registration and authentication APIs
+- Uses raw verification through `verify-passkey-action` for sensitive actions so the current session is not replaced
+- Login Passkey authentication uses `signInWithPasskey()` followed by `verifyPasskeyAction('login')` which establishes login assurance for the new session
+- Lists, renames, and deletes Passkeys through `passkey-manage`
+- `browserSupportsPasskeys()` gates Passkey UI by browser capability
 
 ### `smooth-scroll.js`
 - `initLenis()` — Initialize Lenis smooth scrolling (respects `prefers-reduced-motion`)
@@ -124,11 +138,11 @@ registerRoute('routeName', {
 - MAX button to use full balance
 - Live INR payout calculation using the platform rate from `getPlatformRate()` (rate stored in `data-rate`, no hardcode)
 - Sticky bottom CTA bar
-- TOTP verification required before order creation
+- Fresh `user_transaction` verification through the unified Authenticator/Passkey dialog before order creation
 
 ### `deposit.js` — Deposit Cryptocurrency (Multi-Screen Wizard)
 - **Screen flow**: loading → no-2fa / no-method / networks → submit → confirming → success / pending
-- **2FA gate**: requires 2FA enabled before depositing; loads active deposit methods and pending deposits
+- **2FA gate**: the current page-level availability check uses Authenticator status; submission itself uses unified fresh verification
 - **Networks screen**: shows available deposit methods from `get_active_deposit_methods` RPC; currently TRC20
 - **Submit screen**: multi-field form with:
   - Declared amount input (numeric, validated > 0)
@@ -156,17 +170,32 @@ registerRoute('routeName', {
 - Sign out button with loading state
 - Version display (v1.1.0)
 
-### `signin.js` — Authentication
-- Google OAuth button with loading state
-- Error display for OAuth failures
-- Handles OAuth return redirect with error params
-- Auto-redirect if already authenticated
+### `signup.js` — Registration
+- Creates a username/password account through the synthetic Supabase Auth email mapping
+- Validates username format and availability
+- Requires immediate Authenticator or Passkey enrollment before setup completes
+- Enrollment establishes login assurance for the new session
+- Signup Passkey enrollment uses the age-limited `signup-authorize` server path
+- Cancelling required security setup signs the new session out
 
-### `security.js` — 2FA Management
-- Shows enabled/disabled 2FA state
-- Enrollment flow: generate secret → show QR → verify code → display recovery codes
-- Disable flow: enter TOTP code to confirm
-- Uses Edge Functions for all TOTP operations
+### `signin.js` — Authentication
+- Username/password form backed by Supabase Auth synthetic email identities
+- Sets `login2faPending` before password authentication
+- Detects enabled Authenticator and registered Passkeys
+- Authenticator-only, Passkey-only, and factor-choice login flows
+- Successful 2FA verification establishes server-side login assurance (session-bound)
+- Security-state failures and cancelled login verification sign the user out
+- Legacy zero-factor users enter mandatory, non-dismissible Authenticator or Passkey setup
+- Calls `completeLogin2FA()` only after the selected security flow succeeds and assurance is confirmed
+
+### `security.js` — Security Management
+- Displays Authenticator and Passkey state independently
+- Authenticator enrollment: generate secret → show QR → verify code → display recovery codes
+- Existing-user Add Passkey: fresh `passkey_enrollment` verification → enrollment authorization → WebAuthn registration
+- Passkey listing, cosmetic rename, and verification-protected deletion
+- Authenticator disable uses unified fresh verification and 2FA invariant enforcement (Phase 28)
+- Frontend conditionally disables Delete/Disable buttons when removal would violate the invariant (amber warning shown)
+- Password change requires current-password reauthentication and fresh scoped verification
 
 ### `notifications.js` — User Notifications
 - List of user notifications from `get_user_notifications` RPC (paginated)
@@ -241,7 +270,7 @@ registerRoute('routeName', {
 - Deposit cards with user email, declared/verified amounts, network, TXID, status
 - **Detail modal with 3-stage verification progress indicator**:
   1. **Blockchain Verification** — auto-verified via TronGrid; shows from-address, block, confirmations, Tronscan link; displays amount differences if declared ≠ verified
-  2. **Manual Admin Verification** — 8-item checklist (TXID correct, TRC20 network, token is USDT, sender verified, recipient matches, amount correct, finality sufficient, wallet info reviewed) + optional notes; no 2FA required (logged confirmation only)
+  2. **Manual Admin Verification** — 8-item checklist (TXID correct, TRC20 network, token is USDT, sender verified, recipient matches, amount correct, finality sufficient, wallet info reviewed) + optional notes; requires `admin_financial` 2FA verification
   3. **Financial Authorization** — credit wallet button with `admin_financial` 2FA challenge; credits `verified_amount`
 - Reject button available for any non-credited/non-rejected deposit (requires `admin_financial` 2FA)
 - Calls: `admin_list_deposits`, `get_deposit_verification_details`, `admin_manually_verify_deposit`, `admin_update_deposit_status`, `admin_credit_deposit`
@@ -259,12 +288,16 @@ registerRoute('routeName', {
 - Filter tabs: All, Payment Pending, Completed, Rejected, Cancelled, Manual Review
 - Order cards with user email, USDT/INR amounts, rate, bank details
 - Detail modal with actions: Complete Order, Reject Order, Cancel Order
-- All actions require TOTP verification (`admin_financial` scope)
+- All actions require fresh unified verification (`admin_financial` scope)
 - Calls: `admin_list_sell_orders`, `admin_complete_sell_order`, `admin_reject_sell_order`
 
-### `security.js` — Admin 2FA Management
-- Same enrollment/disable flow as user security page
-- Scoped to admin context
+### `security.js` — Admin Security Management
+- Mirrors user Authenticator and Passkey management
+- Add Passkey uses the dedicated `passkey_enrollment` scope
+- Passkey deletion and Authenticator disable use `admin_financial` verification
+- 2FA invariant (`active_2fa_methods >= 1`) enforced server-side via advisory lock and factor-removal receipts (Phase 28)
+- Frontend conditionally disables Delete/Disable buttons when removal would violate the invariant (amber warning shown)
+- Password changes require current-password reauthentication and `admin_financial` verification
 
 ### `notifications-page.js` — Admin Notifications
 - List of admin notifications from `get_user_notifications` RPC (paginated)
@@ -329,7 +362,7 @@ registerRoute('routeName', {
 | `StatusBadge` | `StatusBadge.js` | Colored badge for order/deposit statuses (includes PENDING_VERIFICATION variants) |
 | `OrderCard` | `OrderCard.js` | Sell order summary card with status |
 | `TransactionItem` | `TransactionItem.js` | Transaction row with icon, amount, status |
-| `TotpDialog` | `TotpDialog.js` | Modal for TOTP verification (returns Promise with `verification_id`) |
+| `TotpDialog` | `TotpDialog.js` | Unified fresh-verification modal; detects available Authenticator/Passkey methods and returns a scoped `verification_id` |
 | `ConfirmDialog` | `admin/ConfirmDialog.js` | Generic confirmation dialog for admin actions |
 | `ChangeRateDialog` | `admin/ChangeRateDialog.js` | Multi-step exchange rate change flow: input → review → `admin_settings` 2FA → final confirm → `admin_update_exchange_rate` RPC → success |
 | `MarketPulse` | `MarketPulse.js` | Live USDT/INR market reference widget (labeled "Market reference") with XReserve rate + info tooltip. Each exchange row shows a brand logo (Binance yellow diamond, OKX four squares, Bybit stylized B) followed by the exchange name in semibold weight |
@@ -340,7 +373,8 @@ registerRoute('routeName', {
 | Module | File | Description |
 |---|---|---|
 | Chat | `chat.js` | Live chat state management, floating chat icon, Realtime subscriptions, active chat polling (20s interval), unread badge, visibility-aware focus tracking |
-| Supabase | `supabase.js` | Supabase client initialization |
+| Supabase | `supabase.js` | Supabase client initialization with persisted, auto-refreshed sessions |
+| Passkey | `core/passkey.js` | WebAuthn registration, login, action verification, listing, rename, and deletion |
 
 ### Navigation System
 - **Bottom nav** — Mobile-only fixed bar (4 items: Home, Wallet, Sell, Orders)

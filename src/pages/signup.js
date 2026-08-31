@@ -3,6 +3,7 @@ import { navigate } from '@/core/router';
 import { validateUsername } from '@/core/username';
 import { supabase } from '@/lib/supabase';
 import { get2FAStatus, begin2FAEnrollment, confirm2FAEnrollment, renderQRCode } from '@/core/totp';
+import { registerPasskeySignup, browserSupportsPasskeys } from '@/core/passkey';
 
 export function renderSignUp() {
   const page = document.createElement('main');
@@ -184,7 +185,14 @@ async function handleSignUp(e) {
         await enforce2FASetup();
       }
     } catch {
-      // If status check fails, still try to navigate but user will be prompted later
+      // Fail closed: if status check or enrollment fails, sign out for security
+      try { await signOut(); } catch { /* session may already be cleared */ }
+      showError('Security check failed. Please try again.');
+      btn.disabled = false;
+      btn.classList.remove('btn-success');
+      btn.classList.add('btn-primary');
+      btn.innerHTML = '<span>Create Account</span>';
+      return;
     }
     
     // Show final success before navigation
@@ -231,161 +239,336 @@ function hideError() {
 }
 
 /**
- * Enforce 2FA setup immediately after signup
- * Blocks navigation until 2FA is enabled or user cancels (signs out)
+ * Enforce 2FA setup immediately after signup.
+ * Blocks navigation until 2FA is enabled or user cancels (signs out).
+ * User must choose Authenticator OR Passkey. No skip/dismiss allowed.
  */
 async function enforce2FASetup() {
   return new Promise(async (resolve, reject) => {
     const overlay = document.createElement('div');
     overlay.className = 'fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4';
-    
+    // Block outside click and Escape
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) return; });
+
     const modal = document.createElement('div');
     modal.className = 'card w-full max-w-sm p-6 step-enter';
+
+    const supportsPasskey = browserSupportsPasskeys();
+
     modal.innerHTML = `
-      <h2 class="text-[17px] font-semibold text-text-primary dark:text-text-primary-dark mb-1">Set Up Two-Factor Authentication</h2>
-      <p class="text-[13px] text-text-secondary dark:text-text-secondary-dark mb-5">For your security, please set up two-factor authentication before continuing.</p>
-      <div id="enroll-step-1">
-        <div class="flex justify-center mb-4">
-          <div id="qr-container" class="flex items-center justify-center" style="min-height: 200px;">
-            <div class="auth-spinner"></div>
-          </div>
-        </div>
-        <div class="card p-3 mb-4 bg-black/[0.03] dark:bg-white/[0.04]">
-          <p class="text-[11px] font-medium uppercase tracking-wider text-text-secondary dark:text-text-secondary-dark mb-1">Secret Key</p>
-          <p id="secret-key" class="font-mono text-[14px] text-text-primary dark:text-text-primary-dark break-all select-all">Loading...</p>
-        </div>
-        <label class="label" for="totp-code">Verification Code</label>
-        <input type="text" inputmode="numeric" maxlength="6" autocomplete="one-time-code"
-          class="input-field text-center text-[20px] tracking-[0.3em] font-mono" placeholder="000000" id="totp-code" />
-        <div id="enroll-error" class="hidden mt-2 text-[13px] text-red-600 dark:text-red-400"></div>
-        <div class="flex gap-3 mt-4">
-          <button id="cancel-enroll" class="btn-secondary flex-1">Cancel</button>
-          <button id="confirm-enroll" class="btn-primary flex-1" disabled>Enable 2FA</button>
-        </div>
-      </div>
-      <div id="enroll-step-2" class="hidden">
-        <div class="text-center py-6">
-          <div class="mb-4 flex justify-center">
-            <div class="flex h-16 w-16 items-center justify-center rounded-full bg-green-500/10">
-              <svg class="h-8 w-8 text-green-600 dark:text-green-400 animate-success-check" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+      <div id="method-select">
+        <h2 class="text-[17px] font-semibold text-text-primary dark:text-text-primary-dark mb-1">Set Up Two-Factor Authentication</h2>
+        <p class="text-[13px] text-text-secondary dark:text-text-secondary-dark mb-5">Choose how to protect your account with two-factor authentication.</p>
+        <div class="space-y-3">
+          <button id="choose-authenticator" class="btn-secondary w-full text-left flex items-center gap-3 p-4">
+            <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-black/[0.04] dark:bg-white/[0.06]">
+              <svg class="h-5 w-5 mt-0.5 text-text-secondary dark:text-text-secondary-dark" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 1.5H8.25A2.25 2.25 0 006 3.75v16.5a2.25 2.25 0 002.25 2.25h7.5A2.25 2.25 0 0018 20.25V3.75a2.25 2.25 0 00-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-6 18.75h9m-9 0v-1.5m9 1.5v-1.5m-9 0h9"/></svg>
             </div>
-          </div>
-          <h3 class="text-[15px] font-semibold text-text-primary dark:text-text-primary-dark mb-2">2FA Enabled Successfully</h3>
-          <p class="text-[13px] text-text-secondary dark:text-text-secondary-dark mb-4">Your account is now protected with two-factor authentication.</p>
-          <div class="card p-3 bg-black/[0.03] dark:bg-white/[0.04]">
-            <p class="text-[11px] font-medium uppercase tracking-wider text-text-secondary dark:text-text-secondary-dark mb-2">Recovery Codes</p>
-            <p class="text-[12px] text-text-secondary dark:text-text-secondary-dark mb-2">Save these codes in a safe place. Each code can only be used once.</p>
-            <div id="recovery-codes" class="font-mono text-[13px] text-text-primary dark:text-text-primary-dark space-y-1"></div>
-          </div>
-          <button id="continue-btn" class="btn-primary w-full mt-4">Continue</button>
+            <div>
+              <p class="text-[14px] font-semibold text-text-primary dark:text-text-primary-dark">Authenticator App</p>
+              <p class="text-[12px] text-text-secondary dark:text-text-secondary-dark">Use Google Authenticator, Authy, or similar</p>
+            </div>
+          </button>
+          ${supportsPasskey ? `
+          <button id="choose-passkey" class="btn-secondary w-full text-left flex items-center gap-3 p-4">
+            <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-black/[0.04] dark:bg-white/[0.06]">
+              <svg class="h-5 w-5 text-text-secondary dark:text-text-secondary-dark" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25c2.25-1.5 3-3.75 3-5.25m3.75 0v-3m-3.75 3V12"/></svg>
+            </div>
+            <div>
+              <p class="text-[14px] font-semibold text-text-primary dark:text-text-primary-dark">Passkey</p>
+              <p class="text-[12px] text-text-secondary dark:text-text-secondary-dark">Use fingerprint, face recognition, or device PIN</p>
+            </div>
+          </button>
+          ` : ''}
         </div>
+        <button id="cancel-setup" class="btn-secondary w-full mt-4 text-red-600 dark:text-red-400">Cancel &amp; Sign Out</button>
       </div>
+      <div id="enroll-container" class="hidden"></div>
     `;
-    
+
     overlay.appendChild(modal);
     document.body.appendChild(overlay);
-    
-    const qrContainer = modal.querySelector('#qr-container');
-    const secretKeyEl = modal.querySelector('#secret-key');
-    const input = modal.querySelector('#totp-code');
-    const confirmBtn = modal.querySelector('#confirm-enroll');
-    const cancelBtn = modal.querySelector('#cancel-enroll');
-    const errorEl = modal.querySelector('#enroll-error');
-    const step1 = modal.querySelector('#enroll-step-1');
-    const step2 = modal.querySelector('#enroll-step-2');
-    const recoveryCodesEl = modal.querySelector('#recovery-codes');
-    const continueBtn = modal.querySelector('#continue-btn');
-    
-    try {
-      // Begin enrollment
-      const { secret, qr_uri } = await begin2FAEnrollment();
-      secretKeyEl.textContent = secret;
-      await renderQRCode(qrContainer, qr_uri);
-      
-      input.addEventListener('input', () => {
-        errorEl.classList.add('hidden');
-        confirmBtn.disabled = input.value.trim().length < 6;
-      });
-      
-      input.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && !confirmBtn.disabled) confirmBtn.click();
-      });
-      
-      cancelBtn.addEventListener('click', async () => {
-        // User cancelled - sign out
-        overlay.remove();
-        await signOut();
-        reject(new Error('2FA setup cancelled'));
-      });
-      
-      confirmBtn.addEventListener('click', async () => {
-        const code = input.value.trim();
-        confirmBtn.disabled = true;
-        confirmBtn.innerHTML = `<div class="auth-spinner"></div><span>Verifying...</span>`;
-        
-        try {
-          const result = await confirm2FAEnrollment(code);
-          if (result.success) {
-            // Show success state on button before transitioning
-            confirmBtn.innerHTML = `
-              <svg class="h-5 w-5 animate-success-check" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
-              </svg>
-              <span>2FA Enabled</span>
-            `;
-            confirmBtn.classList.add('btn-success');
-            confirmBtn.classList.remove('btn-primary');
-            
-            // Wait briefly for success animation
-            await new Promise(resolve => setTimeout(resolve, 600));
-            
-            // Show recovery codes
-            step1.classList.add('hidden');
-            step2.classList.remove('hidden');
-            
-            // Display recovery codes
-            if (result.recovery_codes && result.recovery_codes.length > 0) {
-              recoveryCodesEl.innerHTML = result.recovery_codes.map(code => 
-                `<div class="select-all">${code}</div>`
-              ).join('');
-            }
-            
-            continueBtn.addEventListener('click', () => {
-              // Show success state on continue button
-              continueBtn.innerHTML = `
-                <svg class="h-5 w-5 animate-success-check" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
-                </svg>
-                <span>Setup Complete</span>
-              `;
-              continueBtn.classList.add('btn-success');
-              continueBtn.classList.remove('btn-primary');
-              continueBtn.disabled = true;
-              
-              // Wait for animation, then close
-              setTimeout(() => {
-                overlay.remove();
-                resolve();
-              }, 600);
-            });
-          }
-        } catch (err) {
-          errorEl.textContent = err.message || 'Invalid code';
-          errorEl.classList.remove('hidden');
-          confirmBtn.disabled = false;
-          confirmBtn.classList.remove('btn-success');
-          confirmBtn.classList.add('btn-primary');
-          confirmBtn.innerHTML = '<span>Enable 2FA</span>';
-          input.value = '';
-          input.focus();
-        }
-      });
-      
-      input.focus();
-    } catch (err) {
+
+    const methodSelect = modal.querySelector('#method-select');
+    const enrollContainer = modal.querySelector('#enroll-container');
+    const cancelBtn = modal.querySelector('#cancel-setup');
+
+    // Block Escape key
+    const escHandler = (e) => { if (e.key === 'Escape') e.stopPropagation(); };
+    document.addEventListener('keydown', escHandler, true);
+
+    async function handleCancel() {
+      document.removeEventListener('keydown', escHandler, true);
       overlay.remove();
       await signOut();
-      reject(err);
+      reject(new Error('2FA setup cancelled'));
+    }
+
+    cancelBtn.addEventListener('click', handleCancel);
+
+    // ── Authenticator choice ──
+    const authBtn = modal.querySelector('#choose-authenticator');
+    if (authBtn) {
+      authBtn.addEventListener('click', async () => {
+        methodSelect.classList.add('hidden');
+        enrollContainer.classList.remove('hidden');
+        try {
+          await runTotpEnrollment(enrollContainer, overlay, resolve, reject, escHandler);
+        } catch (err) {
+          document.removeEventListener('keydown', escHandler, true);
+          overlay.remove();
+          await signOut();
+          reject(err);
+        }
+      });
+    }
+
+    // ── Passkey choice ──
+    const passkeyBtn = modal.querySelector('#choose-passkey');
+    if (passkeyBtn) {
+      passkeyBtn.addEventListener('click', async () => {
+        methodSelect.classList.add('hidden');
+        enrollContainer.classList.remove('hidden');
+        try {
+          await runPasskeyEnrollment(enrollContainer, overlay, resolve, reject, escHandler);
+        } catch (err) {
+          document.removeEventListener('keydown', escHandler, true);
+          overlay.remove();
+          await signOut();
+          reject(err);
+        }
+      });
+    }
+  });
+}
+
+/**
+ * TOTP enrollment flow (existing behavior, extracted).
+ */
+async function runTotpEnrollment(container, overlay, resolve, reject, escHandler) {
+  container.innerHTML = `
+    <div id="enroll-step-1">
+      <h2 class="text-[17px] font-semibold text-text-primary dark:text-text-primary-dark mb-1">Authenticator Setup</h2>
+      <p class="text-[13px] text-text-secondary dark:text-text-secondary-dark mb-4">Scan the QR code with your authenticator app.</p>
+      <div class="flex justify-center mb-4">
+        <div id="qr-container" class="flex items-center justify-center" style="min-height: 200px;">
+          <div class="auth-spinner"></div>
+        </div>
+      </div>
+      <div class="card p-3 mb-4 bg-black/[0.03] dark:bg-white/[0.04]">
+        <p class="text-[11px] font-medium uppercase tracking-wider text-text-secondary dark:text-text-secondary-dark mb-1">Secret Key</p>
+        <p id="secret-key" class="font-mono text-[14px] text-text-primary dark:text-text-primary-dark break-all select-all">Loading...</p>
+      </div>
+      <label class="label" for="totp-code">Verification Code</label>
+      <input type="text" inputmode="numeric" maxlength="6" autocomplete="one-time-code"
+        class="input-field text-center text-[20px] tracking-[0.3em] font-mono" placeholder="000000" id="totp-code" />
+      <div id="enroll-error" class="hidden mt-2 text-[13px] text-red-600 dark:text-red-400"></div>
+      <div class="flex gap-3 mt-4">
+        <button id="back-to-methods" class="btn-secondary flex-1">Back</button>
+        <button id="confirm-enroll" class="btn-primary flex-1" disabled>Enable 2FA</button>
+      </div>
+    </div>
+    <div id="enroll-step-2" class="hidden">
+      <div class="text-center py-6">
+        <div class="mb-4 flex justify-center">
+          <div class="flex h-16 w-16 items-center justify-center rounded-full bg-green-500/10">
+            <svg class="h-8 w-8 text-green-600 dark:text-green-400 animate-success-check" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+          </div>
+        </div>
+        <h3 class="text-[15px] font-semibold text-text-primary dark:text-text-primary-dark mb-2">2FA Enabled Successfully</h3>
+        <p class="text-[13px] text-text-secondary dark:text-text-secondary-dark mb-4">Your account is now protected with two-factor authentication.</p>
+        <div class="card p-3 bg-black/[0.03] dark:bg-white/[0.04]">
+          <p class="text-[11px] font-medium uppercase tracking-wider text-text-secondary dark:text-text-secondary-dark mb-2">Recovery Codes</p>
+          <p class="text-[12px] text-text-secondary dark:text-text-secondary-dark mb-2">Save these codes in a safe place. Each code can only be used once.</p>
+          <div id="recovery-codes" class="font-mono text-[13px] text-text-primary dark:text-text-primary-dark space-y-1"></div>
+        </div>
+        <button id="continue-btn" class="btn-primary w-full mt-4">Continue</button>
+      </div>
+    </div>
+  `;
+
+  const qrContainer = container.querySelector('#qr-container');
+  const secretKeyEl = container.querySelector('#secret-key');
+  const input = container.querySelector('#totp-code');
+  const confirmBtn = container.querySelector('#confirm-enroll');
+  const backBtn = container.querySelector('#back-to-methods');
+  const errorEl = container.querySelector('#enroll-error');
+  const step1 = container.querySelector('#enroll-step-1');
+  const step2 = container.querySelector('#enroll-step-2');
+  const recoveryCodesEl = container.querySelector('#recovery-codes');
+  const continueBtn = container.querySelector('#continue-btn');
+
+  const { secret, qr_uri } = await begin2FAEnrollment();
+  secretKeyEl.textContent = secret;
+  await renderQRCode(qrContainer, qr_uri);
+
+  input.addEventListener('input', () => {
+    errorEl.classList.add('hidden');
+    confirmBtn.disabled = input.value.trim().length < 6;
+  });
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !confirmBtn.disabled) confirmBtn.click();
+  });
+
+  backBtn.addEventListener('click', () => {
+    container.classList.add('hidden');
+    container.closest('.card').querySelector('#method-select').classList.remove('hidden');
+  });
+
+  confirmBtn.addEventListener('click', async () => {
+    const code = input.value.trim();
+    confirmBtn.disabled = true;
+    confirmBtn.innerHTML = `<div class="auth-spinner"></div><span>Verifying...</span>`;
+
+    try {
+      const result = await confirm2FAEnrollment(code);
+      if (result.success) {
+        confirmBtn.innerHTML = `
+          <svg class="h-5 w-5 animate-success-check" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
+          </svg>
+          <span>2FA Enabled</span>
+        `;
+        confirmBtn.classList.add('btn-success');
+        confirmBtn.classList.remove('btn-primary');
+
+        await new Promise(r => setTimeout(r, 600));
+
+        step1.classList.add('hidden');
+        step2.classList.remove('hidden');
+
+        if (result.recovery_codes && result.recovery_codes.length > 0) {
+          recoveryCodesEl.innerHTML = result.recovery_codes.map(c =>
+            `<div class="select-all">${c}</div>`
+          ).join('');
+        }
+
+        continueBtn.addEventListener('click', () => {
+          continueBtn.innerHTML = `
+            <svg class="h-5 w-5 animate-success-check" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
+            </svg>
+            <span>Setup Complete</span>
+          `;
+          continueBtn.classList.add('btn-success');
+          continueBtn.classList.remove('btn-primary');
+          continueBtn.disabled = true;
+
+          setTimeout(() => {
+            document.removeEventListener('keydown', escHandler, true);
+            overlay.remove();
+            resolve();
+          }, 600);
+        });
+      }
+    } catch (err) {
+      errorEl.textContent = err.message || 'Invalid code';
+      errorEl.classList.remove('hidden');
+      confirmBtn.disabled = false;
+      confirmBtn.classList.remove('btn-success');
+      confirmBtn.classList.add('btn-primary');
+      confirmBtn.innerHTML = '<span>Enable 2FA</span>';
+      input.value = '';
+      input.focus();
+    }
+  });
+
+  input.focus();
+}
+
+/**
+ * Passkey enrollment flow (signup-time).
+ */
+async function runPasskeyEnrollment(container, overlay, resolve, reject, escHandler) {
+  container.innerHTML = `
+    <div id="passkey-step-1">
+      <h2 class="text-[17px] font-semibold text-text-primary dark:text-text-primary-dark mb-1">Passkey Setup</h2>
+      <p class="text-[13px] text-text-secondary dark:text-text-secondary-dark mb-5">Register a passkey using your device's fingerprint, face recognition, or PIN.</p>
+      <div class="card p-4 mb-4 bg-black/[0.03] dark:bg-white/[0.04]">
+        <div class="flex items-center gap-3 mb-2">
+          <svg class="h-6 w-6 text-action dark:text-action-dark" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25c2.25-1.5 3-3.75 3-5.25m3.75 0v-3m-3.75 3V12"/></svg>
+          <p class="text-[13px] font-medium text-text-primary dark:text-text-primary-dark">Your device will prompt you to verify</p>
+        </div>
+        <p class="text-[12px] text-text-secondary dark:text-text-secondary-dark">This could be Touch ID, Face ID, Windows Hello, or a security key.</p>
+      </div>
+      <div id="passkey-error" class="hidden mb-4 rounded-xl bg-red-500/10 px-4 py-3 text-[13px] font-medium text-red-600 dark:text-red-400"></div>
+      <div class="flex gap-3">
+        <button id="back-to-methods" class="btn-secondary flex-1">Back</button>
+        <button id="register-passkey-btn" class="btn-primary flex-1">Create Passkey</button>
+      </div>
+    </div>
+    <div id="passkey-step-2" class="hidden">
+      <div class="text-center py-6">
+        <div class="mb-4 flex justify-center">
+          <div class="flex h-16 w-16 items-center justify-center rounded-full bg-green-500/10">
+            <svg class="h-8 w-8 text-green-600 dark:text-green-400 animate-success-check" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+          </div>
+        </div>
+        <h3 class="text-[15px] font-semibold text-text-primary dark:text-text-primary-dark mb-2">Passkey Registered</h3>
+        <p class="text-[13px] text-text-secondary dark:text-text-secondary-dark mb-4">Your account is now protected with passkey authentication.</p>
+        <button id="continue-btn" class="btn-primary w-full">Continue</button>
+      </div>
+    </div>
+  `;
+
+  const registerBtn = container.querySelector('#register-passkey-btn');
+  const backBtn = container.querySelector('#back-to-methods');
+  const errorEl = container.querySelector('#passkey-error');
+  const step1 = container.querySelector('#passkey-step-1');
+  const step2 = container.querySelector('#passkey-step-2');
+  const continueBtn = container.querySelector('#continue-btn');
+
+  backBtn.addEventListener('click', () => {
+    container.classList.add('hidden');
+    container.closest('.card').querySelector('#method-select').classList.remove('hidden');
+  });
+
+  registerBtn.addEventListener('click', async () => {
+    registerBtn.disabled = true;
+    registerBtn.innerHTML = `<div class="auth-spinner"></div><span>Creating...</span>`;
+    errorEl.classList.add('hidden');
+
+    try {
+      await registerPasskeySignup();
+
+      registerBtn.innerHTML = `
+        <svg class="h-5 w-5 animate-success-check" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
+        </svg>
+        <span>Passkey Created</span>
+      `;
+      registerBtn.classList.add('btn-success');
+      registerBtn.classList.remove('btn-primary');
+
+      await new Promise(r => setTimeout(r, 600));
+
+      step1.classList.add('hidden');
+      step2.classList.remove('hidden');
+
+      continueBtn.addEventListener('click', () => {
+        continueBtn.innerHTML = `
+          <svg class="h-5 w-5 animate-success-check" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
+          </svg>
+          <span>Setup Complete</span>
+        `;
+        continueBtn.classList.add('btn-success');
+        continueBtn.disabled = true;
+
+        setTimeout(() => {
+          document.removeEventListener('keydown', escHandler, true);
+          overlay.remove();
+          resolve();
+        }, 600);
+      });
+    } catch (err) {
+      errorEl.textContent = err.message || 'Failed to create passkey';
+      errorEl.classList.remove('hidden');
+      registerBtn.disabled = false;
+      registerBtn.classList.remove('btn-success');
+      registerBtn.classList.add('btn-primary');
+      registerBtn.innerHTML = '<span>Create Passkey</span>';
     }
   });
 }

@@ -3,7 +3,7 @@ import 'lenis/dist/lenis.css';
 
 import { initTheme } from '@/core/theme';
 import { initLenis } from '@/core/smooth-scroll';
-import { initAuth, onAuthStateChange, isAdmin, signOut, openAuthGate, is2FAVerified } from '@/core/auth';
+import { initAuth, onAuthStateChange, isAdmin, signOut, openAuthGate, is2FAVerified, isAuthenticated } from '@/core/auth';
 import { initApp, setAdminState, rebuildUserLayout } from '@/app';
 import { navigate, refreshCurrentPage, getCurrentRoute, initRouter } from '@/core/router';
 import { getWalletBalance, startWalletHeartbeat, stopWalletHeartbeat } from '@/data/wallet-data';
@@ -43,22 +43,22 @@ appEl.innerHTML = `
 
   await initAuth();
 
-  // Get session for layout/navigation logic below
-  const { data: { session } } = await supabase.auth.getSession();
-
-  // Open the auth gate — currentUser is now set, listeners fire
+  // Open the auth gate — only populates currentUser if server-side
+  // login assurance confirms this session completed 2FA.
   await openAuthGate();
 
   // Initialize router AFTER auth is ready so the initial render
   // has the correct authentication state
   initRouter();
 
-  // Check admin status early so nav/layout can use it
-  const isAdm = await isAdmin();
-  setAdminState(isAdm);
+  // Only initialize authenticated features if assurance passed.
+  // isAuthenticated() checks currentUser which is ONLY set after
+  // server-confirmed login assurance.
+  if (isAuthenticated()) {
+    // Check admin status so nav/layout can use it
+    const isAdm = await isAdmin();
+    setAdminState(isAdm);
 
-  // Propagate initial auth state now that gate is open
-  if (session) {
     onAuthStateChange(() => {}); // ensure listener is registered
     // Rebuild layout with authenticated state (wallet control, etc.)
     rebuildUserLayout();
@@ -79,13 +79,13 @@ appEl.innerHTML = `
         refreshCurrentPage();
       }
     }
-  }
 
-  // If admin on home, redirect to admin dashboard
-  if (isAdm) {
-    const hash = window.location.hash.slice(1);
-    if (!hash || hash === 'home') {
-      navigate('admin');
+    // If admin on home, redirect to admin dashboard
+    if (isAdm) {
+      const hash2 = window.location.hash.slice(1);
+      if (!hash2 || hash2 === 'home') {
+        navigate('admin');
+      }
     }
   }
 })();

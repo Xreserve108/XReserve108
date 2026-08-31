@@ -68,7 +68,7 @@ VITE_SUPABASE_ANON_KEY=your-anon-key
 
 ### 4.1 Run Database Migrations
 
-Apply the 23 migration files in order to create all tables, RLS policies, RPC functions, and triggers:
+Apply all migration files in numerical order through migration 036 to create the current tables, RLS policies, RPC functions, triggers, support systems, and Passkey enrollment controls:
 
 ```bash
 supabase migration up --linked --include-all --yes
@@ -103,26 +103,41 @@ Or apply them individually via the Supabase SQL Editor in the dashboard:
 | 21 | `021_pre_reconstruction_cleanup.sql` | Pre-reconstruction cleanup |
 | 22 | `022_live_support_chat.sql` | Live support chat: `support_agent_status`, `support_chat_sessions`, `support_chat_messages` tables, RLS, Realtime publication, 16 RPC functions |
 | 23 | `023_agent_heartbeat_race_hardening.sql` | Agent heartbeat (`last_heartbeat_at`), stale-agent filtering (>3 min), duplicate active-chat unique index |
+| 24 | `024_support_tickets.sql` | Support ticket tables, messages, internal notes, RLS, and RPCs |
+| 25 | `025_phase2_ticket_security_hardening.sql` | Ticket authorization and permission hardening |
+| 26 | `026_ticket_ux_fixes.sql` | Ticket workflow corrections supporting the current UI |
+| 27 | `027_fix_live_chat_return_functions.sql` | Live-chat return-function corrections |
+| 28 | `028_end_chat_purge_history.sql` | Ended-chat history purge behavior |
+| 29 | `029_stale_session_recovery.sql` | Stale support-session recovery |
+| 30 | `030_chat_session_presence_heartbeat.sql` | Chat-session presence heartbeat |
+| 31 | `031_fix_chat_rpc_ambiguity_and_type.sql` | Chat RPC ambiguity and type corrections |
+| 32 | `032_admin_users_management.sql` | Admin user-management functions |
+| 33 | `033_fix_admin_list_users_ambiguity.sql` | Admin list-users ambiguity correction |
+| 34 | `034_add_is_admin_to_list_users.sql` | Admin state in user-list results |
+| 35 | `035_passkey_2fa_support.sql` | Passkey verification tokens and challenge replay prevention |
+| 36 | `036_phase_20_passkey_enrollment_authorization.sql` | Server-side Passkey enrollment authorization and credential trigger |
 
 > **Note on Migration 011b**: If migrations 012+ are already applied but 011 is missing, use `011b` instead of `011`. Migration 011b excludes Section 9 (the `admin_credit_deposit` redefinition) which would revert 012's security fix.
 
-### 4.2 Configure Google OAuth
+### 4.2 Configure Supabase Authentication
 
-1. Go to Supabase Dashboard → **Authentication** → **Providers**
-2. Enable **Google** provider
-3. Create OAuth 2.0 credentials in [Google Cloud Console](https://console.cloud.google.com/):
-   - **Authorized redirect URI**: `https://<your-project-id>.supabase.co/auth/v1/callback`
-4. Enter the **Client ID** and **Client Secret** in Supabase
+1. Enable email/password authentication in the Supabase project
+2. Ensure the project Auth service supports the Passkey APIs used by `@supabase/auth-js`
+3. XReserve maps each normalized username to a synthetic `@xreserve.com` email identity; users interact with usernames, not those internal email values
+4. Confirm the deployed Auth schema provides `auth.webauthn_credentials` before applying migration 036
+5. Keep session persistence and token refresh enabled in the frontend client
 
 ### 4.3 Deploy Edge Functions
 
-Deploy the 6 Edge Functions to your Supabase project:
+Deploy the current Edge Functions to the Supabase project, including the security functions:
 
 ```bash
 supabase functions deploy enroll-2fa --no-verify-jwt
 supabase functions deploy verify-2fa --no-verify-jwt
 supabase functions deploy verify-2fa-setup --no-verify-jwt
 supabase functions deploy disable-2fa --no-verify-jwt
+supabase functions deploy passkey-manage --no-verify-jwt
+supabase functions deploy verify-passkey-action --no-verify-jwt
 supabase functions deploy verify-trc20-deposit --no-verify-jwt
 supabase functions deploy market-rates --no-verify-jwt
 ```
@@ -161,7 +176,7 @@ supabase secrets set BLOCKCHAIN_VERIFY_SECRET=<your-verify-secret>
 
 ## 5. Create an Admin User
 
-After signing up with Google OAuth, promote your user to admin by inserting a row into the `admin_users` table:
+After signing up with a username and password, promote the intended user by inserting a controlled `admin_users` row. In production, prefer the existing super-admin management path rather than routine manual SQL changes:
 
 ```sql
 INSERT INTO admin_users (user_id, role, is_active)
@@ -205,9 +220,9 @@ The app will be available at `http://localhost:3000`.
 
 After starting the dev server, verify everything works:
 
-1. **Sign in** — Click "Sign in with Google". You should be redirected to Google OAuth and back.
-2. **Home page** — You should see your wallet balance (0 USDT) and the current exchange rate.
-3. **2FA setup** — Navigate to Security settings and enroll in 2FA. Scan the QR code with an authenticator app.
+1. **Sign in** — Enter the registered username and password.
+2. **Mandatory security setup** — A new or legacy zero-factor account must configure an Authenticator or Passkey before application access.
+3. **Login verification** — Accounts with configured factors must complete the available Authenticator/Passkey flow.
 4. **Deposit flow** — Navigate to Deposit. You should see the network selection screen (if a deposit method is configured). Fill in the deposit form and submit.
 5. **Admin panel** — If you created an admin user, navigate to `/admin/redirect` to access the admin dashboard.
 6. **Admin deposit methods** — Go to Settings → Deposit Methods and configure a TRC20 address.
@@ -216,9 +231,18 @@ After starting the dev server, verify everything works:
 
 ## Troubleshooting
 
-### OAuth redirect fails
-- Ensure the redirect URI in Google Cloud Console exactly matches `https://<project-id>.supabase.co/auth/v1/callback`
-- Check that the Google provider is enabled in Supabase
+### Authentication fails
+- Confirm email/password authentication is enabled
+- Verify username normalization and synthetic email mapping are consistent
+- Confirm the account has completed mandatory Authenticator or Passkey setup
+- Inspect Supabase Auth and Edge Function logs without exposing tokens or credentials
+
+### Passkey enrollment fails
+- Confirm `passkey-manage` and `verify-passkey-action` are deployed from the same repository revision
+- Confirm migrations 035 and 036 are applied
+- Verify `auth.webauthn_credentials` exists and `check_passkey_enrollment_auth` is installed
+- Verify `supabase_auth_admin` has the migration 036 authorization-table grants
+- Preserve exact `passkey_enrollment` scope and `_consume_verification_token(p_token_id, p_required_scope)` parameter names
 
 ### Edge Functions return 401/500
 - Verify `TOTP_ENCRYPTION_KEY` secret is set: `supabase secrets list`
@@ -237,7 +261,7 @@ After starting the dev server, verify everything works:
 - Verify the deposit method's `destination_address` is a valid TRC20 USDT address
 
 ### Database functions not found
-- Ensure all 20 migrations have been applied in order
+- Ensure all migrations through 036 have been applied in order
 - Check for errors in the Supabase SQL Editor or via `supabase migration up --linked`
 - If 012+ was applied but 011 is missing, use `011b` (corrective migration)
 
@@ -255,20 +279,20 @@ After starting the dev server, verify everything works:
 
 ```
 src/
-├── main.js          # App bootstrap (auth → 2FA gate → router)
+├── main.js          # App bootstrap (session restoration → auth state → router)
 ├── app.js           # Route definitions, layout switching
-├── core/            # auth, router, theme, totp, smooth-scroll
+├── core/            # auth, router, theme, TOTP, Passkeys, smooth-scroll
 ├── lib/supabase.js  # Supabase client initialization
 ├── data/            # wallet-data, market-data, platform-rate
-├── pages/           # User page renderers (home, wallet, sell, deposit, orders, profile, signin, security, notifications)
-├── admin/           # Admin page renderers (dashboard, deposits, deposit-methods, sell-orders, security, notifications-page)
+├── pages/           # User pages including auth, security, support, tickets, wallet, deposits, and orders
+├── admin/           # Admin operations, users, security, notifications, live chat, and tickets
 ├── components/      # Shared UI components (incl. MarketPulse)
 ├── layouts/         # Admin layout wrapper
 └── styles/app.css   # Tailwind + custom component classes
 
 supabase/
-├── functions/       # 6 Deno Edge Functions (enroll-2fa, verify-2fa, verify-2fa-setup, disable-2fa, verify-trc20-deposit, market-rates)
-└── migrations/      # 23 SQL migration files + corrective migrations (011b, 014b)
+├── functions/       # Deno Edge Functions, including TOTP and Passkey security functions
+└── migrations/      # Sequential SQL migrations through 036
 ```
 
 See the other wiki pages for detailed documentation on each module.

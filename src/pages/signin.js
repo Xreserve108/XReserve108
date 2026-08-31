@@ -1,7 +1,8 @@
 import { signInWithUsername, isAuthenticated, signOut, setLogin2faPending, completeLogin2FA } from '@/core/auth';
 import { navigate } from '@/core/router';
 import { normalizeUsername } from '@/core/username';
-import { get2FAStatus } from '@/core/totp';
+import { get2FAStatus, begin2FAEnrollment, confirm2FAEnrollment, renderQRCode } from '@/core/totp';
+import { signInWithPasskey, establishPasskeyLoginAssurance, browserSupportsPasskeys, listPasskeys, registerPasskeyMandatory } from '@/core/passkey';
 import { TotpDialog } from '@/components/TotpDialog';
 
 export function renderSignIn() {
@@ -106,22 +107,70 @@ async function handleUsernameSignIn(e) {
     
     // Check 2FA status and enforce verification
     try {
+      // Check TOTP status
       const status = await get2FAStatus();
-      if (status.enabled) {
+      const hasTotp = status.enabled;
+
+      // Check passkey status — fail-closed only if TOTP is also unknown
+      let hasPasskey = false;
+      let passkeyCheckFailed = false;
+      if (browserSupportsPasskeys()) {
+        try {
+          const passkeys = await listPasskeys();
+          if (!Array.isArray(passkeys)) {
+            throw new Error('Invalid passkey state');
+          }
+          hasPasskey = passkeys.length > 0;
+        } catch {
+          passkeyCheckFailed = true;
+          // hasPasskey remains false
+        }
+      }
+
+      // If TOTP is not enabled AND passkey check failed → fail closed (no 2FA method confirmed)
+      if (!hasTotp && passkeyCheckFailed) {
+        throw new Error('Security state lookup failed');
+      }
+
+      if (hasTotp || hasPasskey) {
         // 2FA is enabled — require verification before granting access
         btn.innerHTML = `<div class="auth-spinner"></div><span>Verifying 2FA...</span>`;
+
         try {
-          await TotpDialog({
-            title: 'Two-Factor Authentication',
-            message: 'Verify your identity to continue.',
-            allowRecovery: true,
-            mode: 'login',
-          });
+          if (hasTotp && hasPasskey) {
+            // Both methods available — show choice dialog
+            await showLogin2FAChoice();
+          } else if (hasPasskey) {
+            // Passkey only — replace session then establish login assurance
+            await signInWithPasskey();
+            await establishPasskeyLoginAssurance();
+          } else {
+            // TOTP only — Edge Function establishes login assurance
+            await TotpDialog({
+              title: 'Two-Factor Authentication',
+              message: 'Enter the 6-digit code from your authenticator app.',
+              allowRecovery: true,
+              mode: 'login',
+              scope: 'login',
+            });
+          }
         } catch {
-          // User cancelled LOGIN 2FA — TotpDialog already called signOut()
+          // User cancelled LOGIN 2FA — sign out
+          try { await signOut(); } catch { /* session may already be cleared */ }
           btn.disabled = false;
           btn.innerHTML = '<span>Sign In</span>';
           showError('2FA authentication is required. Login failed. Please login again.');
+          return;
+        }
+      } else {
+        // Case D: ZERO 2FA factors — mandatory 2FA setup before access
+        try {
+          await requireMandatory2FASetup(btn);
+        } catch {
+          try { await signOut(); } catch { /* session may already be cleared */ }
+          btn.disabled = false;
+          btn.innerHTML = '<span>Sign In</span>';
+          showError('Two-factor authentication is required. Please login again.');
           return;
         }
       }
@@ -175,4 +224,364 @@ function showError(msg) {
 function hideError() {
   const el = document.getElementById('signin-error');
   if (el) el.classList.add('hidden');
+}
+
+/**
+ * Login 2FA choice dialog — user picks Authenticator or Passkey.
+ * Non-dismissable: outside click does nothing, Escape does nothing.
+ * Cancel signs out.
+ */
+function showLogin2FAChoice() {
+  return new Promise((resolve, reject) => {
+    const overlay = document.createElement('div');
+    overlay.className = 'fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4';
+    // Block outside click
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) return; });
+
+    const modal = document.createElement('div');
+    modal.className = 'card w-full max-w-sm p-6 step-enter';
+    modal.innerHTML = `
+      <h2 class="text-[17px] font-semibold text-text-primary dark:text-text-primary-dark mb-1">Two-Factor Authentication</h2>
+      <p class="text-[13px] text-text-secondary dark:text-text-secondary-dark mb-5">Choose how to verify your identity.</p>
+      <div class="space-y-3">
+        <button id="login-choose-totp" class="btn-secondary w-full text-left flex items-center gap-3 p-4">
+          <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-black/[0.04] dark:bg-white/[0.06]">
+            <svg class="h-5 w-5 mt-0.5 text-text-secondary dark:text-text-secondary-dark" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 1.5H8.25A2.25 2.25 0 006 3.75v16.5a2.25 2.25 0 002.25 2.25h7.5A2.25 2.25 0 0018 20.25V3.75a2.25 2.25 0 00-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-6 18.75h9m-9 0v-1.5m9 1.5v-1.5m-9 0h9"/></svg>
+          </div>
+          <div>
+            <p class="text-[14px] font-semibold text-text-primary dark:text-text-primary-dark">Authenticator Code</p>
+            <p class="text-[12px] text-text-secondary dark:text-text-secondary-dark">Enter 6-digit code from your app</p>
+          </div>
+        </button>
+        <button id="login-choose-passkey" class="btn-secondary w-full text-left flex items-center gap-3 p-4">
+          <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-black/[0.04] dark:bg-white/[0.06]">
+            <svg class="h-5 w-5 text-text-secondary dark:text-text-secondary-dark" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25c2.25-1.5 3-3.75 3-5.25m3.75 0v-3m-3.75 3V12"/></svg>
+          </div>
+          <div>
+            <p class="text-[14px] font-semibold text-text-primary dark:text-text-primary-dark">Passkey</p>
+            <p class="text-[12px] text-text-secondary dark:text-text-secondary-dark">Use fingerprint, face recognition, or PIN</p>
+          </div>
+        </button>
+      </div>
+      <button id="login-2fa-cancel" class="btn-secondary w-full mt-4 text-red-600 dark:text-red-400">Cancel</button>
+      <div id="login-2fa-error" class="hidden mt-3 rounded-xl bg-red-500/10 px-4 py-2.5 text-[13px] font-medium text-red-600 dark:text-red-400"></div>
+    `;
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    // Block Escape
+    const escHandler = (e) => { if (e.key === 'Escape') e.stopPropagation(); };
+    document.addEventListener('keydown', escHandler, true);
+
+    function cleanup() {
+      document.removeEventListener('keydown', escHandler, true);
+      overlay.remove();
+    }
+
+    const cancelBtn = modal.querySelector('#login-2fa-cancel');
+    const errorEl = modal.querySelector('#login-2fa-error');
+    const totpBtn = modal.querySelector('#login-choose-totp');
+    const passkeyBtn = modal.querySelector('#login-choose-passkey');
+
+    cancelBtn.addEventListener('click', async () => {
+      cleanup();
+      try { await signOut(); } catch { /* session may already be cleared */ }
+      reject(new Error('cancelled'));
+    });
+
+    // ── TOTP choice ──
+    totpBtn.addEventListener('click', async () => {
+      cleanup();
+      try {
+        await TotpDialog({
+          title: 'Authenticator Code',
+          message: 'Enter the 6-digit code from your authenticator app.',
+          allowRecovery: true,
+          mode: 'login',
+          scope: 'login',
+        });
+        resolve();
+      } catch {
+        reject(new Error('cancelled'));
+      }
+    });
+
+    // ── Passkey choice ──
+    passkeyBtn.addEventListener('click', async () => {
+      passkeyBtn.disabled = true;
+      passkeyBtn.innerHTML = `<div class="auth-spinner"></div><span>Verifying...</span>`;
+      try {
+        // Replace session with passkey-authenticated session
+        await signInWithPasskey();
+        // Establish login assurance (passkey ceremony is the proof)
+        await establishPasskeyLoginAssurance();
+        cleanup();
+        resolve();
+      } catch (err) {
+        errorEl.textContent = err.message || 'Passkey verification failed';
+        errorEl.classList.remove('hidden');
+        passkeyBtn.disabled = false;
+        passkeyBtn.innerHTML = `
+          <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-black/[0.04] dark:bg-white/[0.06]">
+            <svg class="h-5 w-5 text-text-secondary dark:text-text-secondary-dark" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25c2.25-1.5 3-3.75 3-5.25m3.75 0v-3m-3.75 3V12"/></svg>
+          </div>
+          <div>
+            <p class="text-[14px] font-semibold text-text-primary dark:text-text-primary-dark">Passkey</p>
+            <p class="text-[12px] text-text-secondary dark:text-text-secondary-dark">Use fingerprint, face recognition, or PIN</p>
+          </div>
+        `;
+      }
+    });
+  });
+}
+
+// ─────────────────────────────────────────────────────────────
+// Mandatory 2FA Setup — Legacy zero-2FA users (Case D)
+// ─────────────────────────────────────────────────────────────
+// Non-dismissable overlay requiring TOTP or Passkey enrollment
+// before granting normal application access.
+
+async function requireMandatory2FASetup(btn) {
+  return new Promise(async (resolve, reject) => {
+    const overlay = document.createElement('div');
+    overlay.className = 'fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4';
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) return; });
+
+    const modal = document.createElement('div');
+    modal.className = 'card w-full max-w-sm p-6 step-enter';
+    const supportsPasskey = browserSupportsPasskeys();
+
+    modal.innerHTML = `
+      <div id="mandatory-method-select">
+        <h2 class="text-[17px] font-semibold text-text-primary dark:text-text-primary-dark mb-1">Set Up Two-Factor Authentication</h2>
+        <p class="text-[13px] text-text-secondary dark:text-text-secondary-dark mb-5">Your account requires two-factor authentication. Choose a method to continue.</p>
+        <div class="space-y-3">
+          <button id="mandatory-choose-authenticator" class="btn-secondary w-full text-left flex items-center gap-3 p-4">
+            <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-black/[0.04] dark:bg-white/[0.06]">
+              <svg class="h-5 w-5 mt-0.5 text-text-secondary dark:text-text-secondary-dark" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 1.5H8.25A2.25 2.25 0 006 3.75v16.5a2.25 2.25 0 002.25 2.25h7.5A2.25 2.25 0 0018 20.25V3.75a2.25 2.25 0 00-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-6 18.75h9m-9 0v-1.5m9 1.5v-1.5m-9 0h9"/></svg>
+            </div>
+            <div>
+              <p class="text-[14px] font-semibold text-text-primary dark:text-text-primary-dark">Authenticator App</p>
+              <p class="text-[12px] text-text-secondary dark:text-text-secondary-dark">Use Google Authenticator, Authy, or similar</p>
+            </div>
+          </button>
+          ${supportsPasskey ? `
+          <button id="mandatory-choose-passkey" class="btn-secondary w-full text-left flex items-center gap-3 p-4">
+            <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-black/[0.04] dark:bg-white/[0.06]">
+              <svg class="h-5 w-5 text-text-secondary dark:text-text-secondary-dark" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25c2.25-1.5 3-3.75 3-5.25m3.75 0v-3m-3.75 3V12"/></svg>
+            </div>
+            <div>
+              <p class="text-[14px] font-semibold text-text-primary dark:text-text-primary-dark">Passkey</p>
+              <p class="text-[12px] text-text-secondary dark:text-text-secondary-dark">Use fingerprint, face recognition, or device PIN</p>
+            </div>
+          </button>
+          ` : ''}
+        </div>
+        <button id="mandatory-cancel" class="btn-secondary w-full mt-4 text-red-600 dark:text-red-400">Cancel &amp; Sign Out</button>
+      </div>
+      <div id="mandatory-enroll-container" class="hidden"></div>
+    `;
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    const methodSelect = modal.querySelector('#mandatory-method-select');
+    const enrollContainer = modal.querySelector('#mandatory-enroll-container');
+    const cancelBtn = modal.querySelector('#mandatory-cancel');
+
+    const escHandler = (e) => { if (e.key === 'Escape') e.stopPropagation(); };
+    document.addEventListener('keydown', escHandler, true);
+
+    async function handleCancel() {
+      document.removeEventListener('keydown', escHandler, true);
+      overlay.remove();
+      reject(new Error('mandatory 2FA setup cancelled'));
+    }
+
+    cancelBtn.addEventListener('click', handleCancel);
+
+    const authBtn = modal.querySelector('#mandatory-choose-authenticator');
+    if (authBtn) {
+      authBtn.addEventListener('click', async () => {
+        methodSelect.classList.add('hidden');
+        enrollContainer.classList.remove('hidden');
+        try {
+          // Await actual enrollment completion (user enters code + confirms)
+          await new Promise((enrollResolve, enrollReject) => {
+            runMandatoryTotpEnrollment(enrollContainer, enrollResolve, enrollReject);
+          });
+          document.removeEventListener('keydown', escHandler, true);
+          overlay.remove();
+          resolve();
+        } catch (err) {
+          enrollContainer.classList.add('hidden');
+          methodSelect.classList.remove('hidden');
+          const errorEl = methodSelect.querySelector('#mandatory-method-error');
+          if (errorEl) {
+            errorEl.textContent = err.message || 'Setup failed';
+            errorEl.classList.remove('hidden');
+          }
+        }
+      });
+    }
+
+    const passkeyBtn = modal.querySelector('#mandatory-choose-passkey');
+    if (passkeyBtn) {
+      passkeyBtn.addEventListener('click', async () => {
+        methodSelect.classList.add('hidden');
+        enrollContainer.classList.remove('hidden');
+        try {
+          // Await actual enrollment completion (user clicks Create + succeeds)
+          await new Promise((enrollResolve, enrollReject) => {
+            runMandatoryPasskeyEnrollment(enrollContainer, enrollResolve, enrollReject);
+          });
+          document.removeEventListener('keydown', escHandler, true);
+          overlay.remove();
+          resolve();
+        } catch (err) {
+          enrollContainer.classList.add('hidden');
+          methodSelect.classList.remove('hidden');
+          const errorEl = methodSelect.querySelector('#mandatory-method-error');
+          if (errorEl) {
+            errorEl.textContent = err.message || 'Setup failed';
+            errorEl.classList.remove('hidden');
+          }
+        }
+      });
+    }
+  });
+}
+
+async function runMandatoryTotpEnrollment(container, onComplete, onError) {
+  container.innerHTML = `
+    <h2 class="text-[17px] font-semibold text-text-primary dark:text-text-primary-dark mb-1">Authenticator Setup</h2>
+    <p class="text-[13px] text-text-secondary dark:text-text-secondary-dark mb-4">Scan the QR code with your authenticator app.</p>
+    <div class="flex justify-center mb-4">
+      <div id="mandatory-qr-container" class="flex items-center justify-center" style="min-height: 200px;">
+        <div class="auth-spinner"></div>
+      </div>
+    </div>
+    <div class="card p-3 mb-4 bg-black/[0.03] dark:bg-white/[0.04]">
+      <p class="text-[11px] font-medium uppercase tracking-wider text-text-secondary dark:text-text-secondary-dark mb-1">Secret Key</p>
+      <p id="mandatory-secret-key" class="font-mono text-[14px] text-text-primary dark:text-text-primary-dark break-all select-all">Loading...</p>
+    </div>
+    <label class="label" for="mandatory-totp-code">Verification Code</label>
+    <input type="text" inputmode="numeric" maxlength="6" autocomplete="one-time-code"
+      class="input-field text-center text-[20px] tracking-[0.3em] font-mono" placeholder="000000" id="mandatory-totp-code" />
+    <div id="mandatory-enroll-error" class="hidden mt-2 text-[13px] text-red-600 dark:text-red-400"></div>
+    <div class="flex gap-3 mt-4">
+      <button id="mandatory-enroll-back" class="btn-secondary flex-1">Back</button>
+      <button id="mandatory-enroll-confirm" class="btn-primary flex-1" disabled>Enable 2FA</button>
+    </div>
+  `;
+
+  const qrContainer = container.querySelector('#mandatory-qr-container');
+  const secretKeyEl = container.querySelector('#mandatory-secret-key');
+  const input = container.querySelector('#mandatory-totp-code');
+  const confirmBtn = container.querySelector('#mandatory-enroll-confirm');
+  const backBtn = container.querySelector('#mandatory-enroll-back');
+  const errorEl = container.querySelector('#mandatory-enroll-error');
+
+  const { secret, qr_uri } = await begin2FAEnrollment();
+  secretKeyEl.textContent = secret;
+  await renderQRCode(qrContainer, qr_uri);
+
+  input.addEventListener('input', () => {
+    errorEl.classList.add('hidden');
+    confirmBtn.disabled = input.value.trim().length < 6;
+  });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !confirmBtn.disabled) confirmBtn.click();
+  });
+  backBtn.addEventListener('click', () => { throw new Error('back'); });
+
+  confirmBtn.addEventListener('click', async () => {
+    const code = input.value.trim();
+    confirmBtn.disabled = true;
+    confirmBtn.innerHTML = `<div class="auth-spinner"></div><span>Verifying...</span>`;
+    try {
+      // verify-2fa-setup Edge Function establishes login assurance
+      const result = await confirm2FAEnrollment(code);
+      if (result.success) {
+        confirmBtn.innerHTML = `
+          <svg class="h-5 w-5 animate-success-check" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
+          </svg>
+          <span>2FA Enabled</span>
+        `;
+        confirmBtn.classList.add('btn-success');
+        confirmBtn.classList.remove('btn-primary');
+        await new Promise(r => setTimeout(r, 800));
+        // Signal completion to the awaiting caller
+        if (onComplete) onComplete();
+      }
+    } catch (err) {
+      errorEl.textContent = err.message || 'Invalid code';
+      errorEl.classList.remove('hidden');
+      confirmBtn.disabled = false;
+      confirmBtn.classList.remove('btn-success');
+      confirmBtn.classList.add('btn-primary');
+      confirmBtn.innerHTML = '<span>Enable 2FA</span>';
+      input.value = '';
+      input.focus();
+      if (onError) onError(err);
+    }
+  });
+
+  input.focus();
+}
+
+async function runMandatoryPasskeyEnrollment(container, onComplete, onError) {
+  container.innerHTML = `
+    <h2 class="text-[17px] font-semibold text-text-primary dark:text-text-primary-dark mb-1">Passkey Setup</h2>
+    <p class="text-[13px] text-text-secondary dark:text-text-secondary-dark mb-5">Register a passkey using your device's fingerprint, face recognition, or PIN.</p>
+    <div class="card p-4 mb-4 bg-black/[0.03] dark:bg-white/[0.04]">
+      <div class="flex items-center gap-3 mb-2">
+        <svg class="h-6 w-6 text-action dark:text-action-dark" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25c2.25-1.5 3-3.75 3-5.25m3.75 0v-3m-3.75 3V12"/></svg>
+        <p class="text-[13px] font-medium text-text-primary dark:text-text-primary-dark">Your device will prompt you to verify</p>
+      </div>
+      <p class="text-[12px] text-text-secondary dark:text-text-secondary-dark">This could be Touch ID, Face ID, Windows Hello, or a security key.</p>
+    </div>
+    <div id="mandatory-passkey-error" class="hidden mb-4 rounded-xl bg-red-500/10 px-4 py-3 text-[13px] font-medium text-red-600 dark:text-red-400"></div>
+    <div class="flex gap-3">
+      <button id="mandatory-passkey-back" class="btn-secondary flex-1">Back</button>
+      <button id="mandatory-register-passkey" class="btn-primary flex-1">Create Passkey</button>
+    </div>
+  `;
+
+  const registerBtn = container.querySelector('#mandatory-register-passkey');
+  const backBtn = container.querySelector('#mandatory-passkey-back');
+  const errorEl = container.querySelector('#mandatory-passkey-error');
+
+  backBtn.addEventListener('click', () => { throw new Error('back'); });
+
+  registerBtn.addEventListener('click', async () => {
+    registerBtn.disabled = true;
+    registerBtn.innerHTML = `<div class="auth-spinner"></div><span>Creating...</span>`;
+    errorEl.classList.add('hidden');
+    try {
+      // registerPasskeyMandatory establishes login assurance internally
+      await registerPasskeyMandatory();
+      registerBtn.innerHTML = `
+        <svg class="h-5 w-5 animate-success-check" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
+        </svg>
+        <span>Passkey Created</span>
+      `;
+      registerBtn.classList.add('btn-success');
+      registerBtn.classList.remove('btn-primary');
+      await new Promise(r => setTimeout(r, 800));
+      // Signal completion to the awaiting caller
+      if (onComplete) onComplete();
+    } catch (err) {
+      errorEl.textContent = err.message || 'Failed to create passkey';
+      errorEl.classList.remove('hidden');
+      registerBtn.disabled = false;
+      registerBtn.classList.remove('btn-success');
+      registerBtn.classList.add('btn-primary');
+      registerBtn.innerHTML = '<span>Create Passkey</span>';
+      if (onError) onError(err);
+    }
+  });
 }
